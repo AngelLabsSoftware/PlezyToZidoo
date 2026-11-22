@@ -15,6 +15,7 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
+        // Zidoo Z9X (and similar) run a 32-bit OS — ship armeabi-v7a only.
         ndk {
             abiFilters "armeabi-v7a"
         }
@@ -28,14 +29,37 @@ android {
         variant.resValue "string", "versionName", variant.versionName
     }
 
+    // Signing priority:
+    // 1) CI / release secrets via PP2Z_* env vars
+    // 2) Project-local private sideload keystore (keystore/pp2z-private-release.jks)
+    // 3) Android debug keystore (local installs only)
+    // The local keystore is a PRIVATE TEST / SIDELOAD key — not for Play Store.
     signingConfigs {
         release {
             def ksPath = System.getenv("PP2Z_KEYSTORE_PATH")
+            def localKs = rootProject.file("keystore/pp2z-private-release.jks")
+            def debugKs = file("${System.getProperty('user.home')}/.android/debug.keystore")
+
+            // Enable JAR + APK Signature Scheme v2 for sideload friendliness on OEM boxes.
+            enableV1Signing true
+            enableV2Signing true
+
             if (ksPath) {
                 storeFile file(ksPath)
                 storePassword System.getenv("PP2Z_KEYSTORE_PASSWORD")
                 keyAlias System.getenv("PP2Z_KEY_ALIAS")
                 keyPassword System.getenv("PP2Z_KEY_PASSWORD")
+            } else if (localKs.exists()) {
+                storeFile localKs
+                // Private sideload credentials — see keystore/README.md
+                storePassword "pp2z-private-sideload"
+                keyAlias "pp2z"
+                keyPassword "pp2z-private-sideload"
+            } else if (debugKs.exists()) {
+                storeFile debugKs
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
             }
         }
     }
@@ -44,9 +68,9 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            if (System.getenv("PP2Z_KEYSTORE_PATH")) {
-                signingConfig signingConfigs.release
-            }
+            // Always attach a signing config so assembleRelease yields an installable APK.
+            // If no keystore is available, Gradle will fail clearly rather than emit unsigned.
+            signingConfig signingConfigs.release
         }
     }
     lint {

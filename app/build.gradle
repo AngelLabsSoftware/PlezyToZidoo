@@ -3,17 +3,21 @@ plugins {
 }
 
 android {
-    namespace "com.jellyfintozidoo"
+    namespace "com.plezyplextozidoo"
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.jellyfintozidoo"
+        applicationId "com.plezyplextozidoo"
         minSdkVersion 28
         targetSdkVersion 28
-        versionCode 20260904
-        versionName "2026.09.4"
+        versionCode 20261122
+        versionName "2026.11.1"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters "armeabi-v7a"
+        }
     }
 
     buildFeatures {
@@ -26,12 +30,12 @@ android {
 
     signingConfigs {
         release {
-            def ksPath = System.getenv("JF2Z_KEYSTORE_PATH")
+            def ksPath = System.getenv("PP2Z_KEYSTORE_PATH")
             if (ksPath) {
                 storeFile file(ksPath)
-                storePassword System.getenv("JF2Z_KEYSTORE_PASSWORD")
-                keyAlias System.getenv("JF2Z_KEY_ALIAS")
-                keyPassword System.getenv("JF2Z_KEY_PASSWORD")
+                storePassword System.getenv("PP2Z_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("PP2Z_KEY_ALIAS")
+                keyPassword System.getenv("PP2Z_KEY_PASSWORD")
             }
         }
     }
@@ -40,7 +44,7 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            if (System.getenv("JF2Z_KEYSTORE_PATH")) {
+            if (System.getenv("PP2Z_KEYSTORE_PATH")) {
                 signingConfig signingConfigs.release
             }
         }

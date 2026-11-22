@@ -102,7 +102,7 @@
                     android:layout_marginTop="16dp"
                     android:orientation="horizontal">
 
-                    <!-- Play Now — solid Jellyfin purple button -->
+                    <!-- Play Now — solid Plex purple button -->
                     <Button
                         android:id="@+id/btnPlayNow"
                         android:layout_width="wrap_content"

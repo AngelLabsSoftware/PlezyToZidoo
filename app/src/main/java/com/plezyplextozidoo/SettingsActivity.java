@@ -1,4 +1,4 @@
-package com.jellyfintozidoo;
+package com.plezyplextozidoo;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
@@ -38,8 +38,7 @@ import java.util.stream.Collectors;
 
 public class SettingsActivity extends AppCompatActivity
 {
-    private final String backupFile = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/JellyfinToZidooSettings.txt";
-    // Instance fields, so the fragment and the activity are released when the screen closes
+    private final String backupFile = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/PlezyPlexToZidooSettings.txt";
     private SettingsFragment settingsFragment;
     private String settingsRootKey;
     private String scrollToPreference;
@@ -52,12 +51,10 @@ public class SettingsActivity extends AppCompatActivity
     {
         super.onCreate(savedInstanceState);
 
-        // Drop any plaintext password an older build left in the default preferences
         SecureStorage.removeLegacyPlaintextPassword(getApplicationContext());
 
-        // Stable per device id for the Jellyfin client identity
         String deviceId = SecureStorage.getDeviceId(getApplicationContext());
-        JellyfinApi.setClientIdentity(Build.MODEL, deviceId, BuildConfig.VERSION_NAME);
+        PlexApi.setClientIdentity(Build.MODEL, deviceId, BuildConfig.VERSION_NAME);
 
         setContentView(R.layout.settings_activity);
         if (savedInstanceState == null)
@@ -132,9 +129,9 @@ public class SettingsActivity extends AppCompatActivity
         scrollToPreference = scrollToPref;
         settingsFragment.setPreferencesFromResource(R.xml.root_preferences, settingsRootKey);
         setSmbPasswordPreference();
-        setJellyfinPasswordPreference();
-        setJellyfinServerUrlPreference();
-        setLoginPreference();
+        setPlexTokenPreference();
+        setPlexServerUrlPreference();
+        setTestConnectionPreference();
 
         Preference substitutionLink = settingsFragment.findPreference("substitution_link");
         if (substitutionLink != null)
@@ -148,107 +145,86 @@ public class SettingsActivity extends AppCompatActivity
         }
     }
 
-    private void setJellyfinPasswordPreference()
+    private void setPlexTokenPreference()
     {
-        EditTextPreference passwordPref = settingsFragment.findPreference("jellyfin_password");
-        if (passwordPref == null) return;
+        EditTextPreference tokenPref = settingsFragment.findPreference("plex_token");
+        if (tokenPref == null) return;
 
         Context context = settingsFragment.requireContext();
         SharedPreferences securePrefs = SecureStorage.getInstance(context);
 
-        // The real password stays in secure storage and is never written into the
-        // preference, which would put it in plaintext in the default preferences file.
-        // Only the summary reflects whether one is set.
-        String existing = securePrefs.getString("jellyfin_password", "");
-        passwordPref.setSummary((existing != null && !existing.isEmpty()) ? "********" : "Not set");
+        String existing = securePrefs.getString("plex_access_token", "");
+        tokenPref.setSummary((existing != null && !existing.isEmpty()) ? "********" : "Not set (optional fallback)");
 
-        // Mask input in the edit dialog
-        passwordPref.setOnBindEditTextListener(editText ->
+        tokenPref.setOnBindEditTextListener(editText ->
                 editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD));
 
-        // Write to secure storage instead of default SharedPreferences
-        passwordPref.setOnPreferenceChangeListener((preference, newValue) ->
+        tokenPref.setOnPreferenceChangeListener((preference, newValue) ->
         {
             String value = (newValue != null) ? newValue.toString().trim() : "";
-            securePrefs.edit().putString("jellyfin_password", value).apply();
-            passwordPref.setSummary(value.isEmpty() ? "Not set" : "********");
+            securePrefs.edit().putString("plex_access_token", value).apply();
+            tokenPref.setSummary(value.isEmpty() ? "Not set (optional fallback)" : "********");
             return false;
         });
-
-        // Show login status
-        Preference loginPref = settingsFragment.findPreference("jellyfin_login");
-        if (loginPref != null)
-        {
-            String token = securePrefs.getString("jellyfin_access_token", "");
-            if (token != null && !token.isEmpty())
-            {
-                loginPref.setSummary("Logged in");
-            }
-        }
     }
 
-    private void setJellyfinServerUrlPreference()
+    private void setPlexServerUrlPreference()
     {
-        EditTextPreference serverUrlPref = settingsFragment.findPreference("jellyfin_server_url");
+        EditTextPreference serverUrlPref = settingsFragment.findPreference("plex_server_url");
         if (serverUrlPref == null) return;
 
-        // Strip trailing slash on save
         serverUrlPref.setOnPreferenceChangeListener((preference, newValue) ->
         {
             String value = (newValue != null) ? newValue.toString().trim() : "";
-            // Strip trailing slash(es)
             while (value.endsWith("/"))
             {
                 value = value.substring(0, value.length() - 1);
             }
-            // Set the cleaned value directly
             serverUrlPref.setText(value);
-            serverUrlPref.setSummary(value);
-            // Return false because we set it manually above
+            serverUrlPref.setSummary(value.isEmpty() ? getString(R.string.plex_server_url_summary) : value);
             return false;
         });
     }
 
-    private void setLoginPreference()
+    private void setTestConnectionPreference()
     {
-        Preference loginPref = settingsFragment.findPreference("jellyfin_login");
-        if (loginPref == null) return;
+        Preference testPref = settingsFragment.findPreference("plex_test_connection");
+        if (testPref == null) return;
 
-        loginPref.setOnPreferenceClickListener(preference ->
+        testPref.setOnPreferenceClickListener(preference ->
         {
             Context context = settingsFragment.requireContext();
             SharedPreferences defaultPrefs = PreferenceManager.getDefaultSharedPreferences(context);
             SharedPreferences securePrefs = SecureStorage.getInstance(context);
-            String serverUrl = defaultPrefs.getString("jellyfin_server_url", "");
-            String username = defaultPrefs.getString("jellyfin_username", "");
-            String password = securePrefs.getString("jellyfin_password", "");
+            String serverUrl = defaultPrefs.getString("plex_server_url", "");
+            String token = securePrefs.getString("plex_access_token", "");
 
-            if (serverUrl == null || serverUrl.isEmpty() || username == null || username.isEmpty()
-                    || password == null || password.isEmpty())
+            if (serverUrl == null || serverUrl.isEmpty())
             {
-                Toast.makeText(context, "Please configure Server URL, Username and Password first", Toast.LENGTH_LONG).show();
+                Toast.makeText(context, "Please configure a fallback Server URL first", Toast.LENGTH_LONG).show();
+                return true;
+            }
+            if (token == null || token.isEmpty())
+            {
+                Toast.makeText(context, "Please configure a fallback X-Plex-Token first", Toast.LENGTH_LONG).show();
                 return true;
             }
 
-            loginPref.setSummary("Logging in...");
-            JellyfinApi.authenticate(serverUrl, username, password, new JellyfinApi.AuthCallback()
+            testPref.setSummary("Testing...");
+            PlexApi.testConnection(serverUrl, token, new PlexApi.SimpleCallback()
             {
                 @Override
-                public void onSuccess(String accessToken, String userId, String serverName)
+                public void onSuccess(String message)
                 {
-                    securePrefs.edit()
-                            .putString("jellyfin_access_token", accessToken)
-                            .putString("jellyfin_user_id", userId)
-                            .apply();
-                    Toast.makeText(context, "Login successful", Toast.LENGTH_LONG).show();
-                    loginPref.setSummary("Logged in");
+                    Toast.makeText(context, message, Toast.LENGTH_LONG).show();
+                    testPref.setSummary(message);
                 }
 
                 @Override
                 public void onError(String error)
                 {
-                    Toast.makeText(context, "Login failed: " + error, Toast.LENGTH_LONG).show();
-                    loginPref.setSummary("Authenticate with Jellyfin server");
+                    Toast.makeText(context, "Connection failed: " + error, Toast.LENGTH_LONG).show();
+                    testPref.setSummary("Test connection failed");
                 }
             });
 
@@ -276,7 +252,6 @@ public class SettingsActivity extends AppCompatActivity
 
     public void onImportClickMethod(View view)
     {
-        // If we had to request permissions, if we did then we'll do the import when we get notified that the access was granted
         if (checkAndRequestPermissions(PERMISSION_REQUEST_IMPORT))
         {
             return;
@@ -310,7 +285,6 @@ public class SettingsActivity extends AppCompatActivity
                 }
             }
 
-            // Need to set the preferences on the substitution page
             settingsFragment.setPreferencesFromResource(R.xml.substitution_preferences, settingsRootKey);
             for (Map.Entry<String, ?> entry : map.entrySet())
             {
@@ -325,46 +299,7 @@ public class SettingsActivity extends AppCompatActivity
             }
 
             showRootSettings("import_export");
-
-            // Auto-authenticate with restored credentials to get a fresh token
-            SharedPreferences defaultPrefs = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
-            String serverUrl = defaultPrefs.getString("jellyfin_server_url", "");
-            String username = defaultPrefs.getString("jellyfin_username", "");
-            String password = SecureStorage.getInstance(getApplicationContext()).getString("jellyfin_password", "");
-
-            if (serverUrl != null && !serverUrl.isEmpty()
-                    && username != null && !username.isEmpty()
-                    && password != null && !password.isEmpty())
-            {
-                JellyfinApi.authenticate(serverUrl, username, password, new JellyfinApi.AuthCallback()
-                {
-                    @Override
-                    public void onSuccess(String accessToken, String userId, String serverName)
-                    {
-                        SecureStorage.getInstance(getApplicationContext()).edit()
-                                .putString("jellyfin_access_token", accessToken)
-                                .putString("jellyfin_user_id", userId)
-                                .apply();
-                        runOnUiThread(() ->
-                                Toast.makeText(getApplicationContext(),
-                                        "Settings imported and logged in successfully",
-                                        Toast.LENGTH_LONG).show());
-                    }
-
-                    @Override
-                    public void onError(String error)
-                    {
-                        runOnUiThread(() ->
-                                Toast.makeText(getApplicationContext(),
-                                        "Settings imported. Login failed: " + error + ", please log in manually",
-                                        Toast.LENGTH_LONG).show());
-                    }
-                });
-            }
-            else
-            {
-                Toast.makeText(getApplicationContext(), "Settings imported successfully from " + backupFile, Toast.LENGTH_LONG).show();
-            }
+            Toast.makeText(getApplicationContext(), "Settings imported successfully from " + backupFile, Toast.LENGTH_LONG).show();
         }
         catch (Exception e)
         {
@@ -392,16 +327,14 @@ public class SettingsActivity extends AppCompatActivity
 
     public void setPreferenceOnImport(Map.Entry<String, ?> entry)
     {
-        // Handle password import — write directly to SecureStorage
-        if(entry.getKey().equals("jellyfin_password"))
+        if(entry.getKey().equals("plex_token") || entry.getKey().equals("plex_access_token"))
         {
             String value = (entry.getValue() != null) ? entry.getValue().toString().trim() : "";
-            SecureStorage.getInstance(getApplicationContext()).edit().putString("jellyfin_password", value).apply();
-            EditTextPreference passwordPref = settingsFragment.findPreference("jellyfin_password");
-            if(passwordPref != null)
+            SecureStorage.getInstance(getApplicationContext()).edit().putString("plex_access_token", value).apply();
+            EditTextPreference tokenPref = settingsFragment.findPreference("plex_token");
+            if(tokenPref != null)
             {
-                // Summary only, the value itself stays in secure storage
-                passwordPref.setSummary(value.isEmpty() ? "Not set" : "********");
+                tokenPref.setSummary(value.isEmpty() ? "Not set (optional fallback)" : "********");
             }
             return;
         }
@@ -433,7 +366,6 @@ public class SettingsActivity extends AppCompatActivity
 
     public void onExportClickMethod(View view)
     {
-        // If we had to request permissions, if we did then we'll do the export when we get notified that the access was granted
         if (checkAndRequestPermissions(PERMISSION_REQUEST_EXPORT))
         {
             return;
@@ -442,36 +374,19 @@ public class SettingsActivity extends AppCompatActivity
         exportSettings();
     }
 
-    /**
-     * True for any preference key that holds a password: the Jellyfin password and every
-     * SMB password slot. Package-private for testability.
-     *
-     * @param key Preference key
-     * @return true when the key holds a password
-     */
     static boolean isPasswordKey(String key)
     {
-        return key != null && ("jellyfin_password".equals(key) || key.startsWith("smbPassword"));
+        return key != null && ("plex_token".equals(key) || "plex_access_token".equals(key)
+                || key.startsWith("smbPassword"));
     }
 
-    /**
-     * Builds the export JSON string from a preferences map.
-     * Always excludes jellyfin_access_token and jellyfin_user_id. Passwords are excluded
-     * unless includePasswords is true, because the export file is plain text in a folder
-     * any app with storage access can read.
-     * Package-private for testability.
-     *
-     * @param prefsMap         Map of preference key-value pairs
-     * @param includePasswords Whether the Jellyfin and SMB passwords go into the file
-     * @return Pretty-printed JSON string
-     */
     static String buildExportJson(Map<String, ?> prefsMap, boolean includePasswords)
     {
         LinkedHashMap<String, Object> filtered = new LinkedHashMap<>();
         for (Map.Entry<String, ?> entry : prefsMap.entrySet())
         {
             String key = entry.getKey();
-            if ("jellyfin_access_token".equals(key) || "jellyfin_user_id".equals(key))
+            if ("plex_access_token".equals(key))
             {
                 continue;
             }
@@ -501,20 +416,14 @@ public class SettingsActivity extends AppCompatActivity
                                                                              e -> (Object) e.getValue(),
                                                                              (oldValue, newValue) -> oldValue, LinkedHashMap::new));
 
-            // Audit: access_token and user_id live in SecureStorage, NOT in default
-            // SharedPreferences, so prefs.getAll() should never contain them.
-            // buildExportJson() defensively excludes them regardless.
-
-            // Passwords are left out unless the user has turned the option on
             boolean includePasswords = prefs.getBoolean("export_include_passwords", false);
 
             if(includePasswords)
             {
-                // The Jellyfin password lives in SecureStorage, not in the default preferences
-                String jellyfinPassword = SecureStorage.getInstance(getApplicationContext()).getString("jellyfin_password", "");
-                if(jellyfinPassword != null && !jellyfinPassword.isEmpty())
+                String plexToken = SecureStorage.getInstance(getApplicationContext()).getString("plex_access_token", "");
+                if(plexToken != null && !plexToken.isEmpty())
                 {
-                    prefsMap.put("jellyfin_password", jellyfinPassword);
+                    prefsMap.put("plex_token", plexToken);
                 }
             }
 
@@ -528,7 +437,7 @@ public class SettingsActivity extends AppCompatActivity
         }
         catch (Exception e)
         {
-            Toast.makeText(getApplicationContext(), e.toString()/*"Failed to export settings to " + backupFile*/, Toast.LENGTH_LONG).show();
+            Toast.makeText(getApplicationContext(), e.toString(), Toast.LENGTH_LONG).show();
         }
         finally
         {
@@ -547,7 +456,6 @@ public class SettingsActivity extends AppCompatActivity
         }
     }
 
-    // Return true if we have to request the permissions, that way the caller can wait until we were granted the permissions before continuing
     public Boolean checkAndRequestPermissions(int requestCode)
     {
         if(checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
@@ -574,7 +482,7 @@ public class SettingsActivity extends AppCompatActivity
                 {
                     importSettings();
                 }
-                else //if(requestCode == PERMISSION_REQUEST_EXPORT)
+                else
                 {
                     exportSettings();
                 }

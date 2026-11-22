@@ -15,7 +15,7 @@
             <corners android:radius="6dp" />
         </shape>
     </item>
-    <!-- Default state — Jellyfin purple -->
+    <!-- Default state — Plex purple -->
     <item>
         <shape android:shape="rectangle">
             <solid android:color="#AA5CC3" />

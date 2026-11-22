@@ -3,4 +3,4 @@ plugins {
 }
 
 include ':app'
-rootProject.name = "JellyfinToZidoo"
+rootProject.name = "PlezyPlexToZidoo"

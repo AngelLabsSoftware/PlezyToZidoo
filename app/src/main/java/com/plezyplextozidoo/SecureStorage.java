@@ -1,4 +1,4 @@
-package com.jellyfintozidoo;
+package com.plezyplextozidoo;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -19,8 +19,8 @@ import java.util.UUID;
 public class SecureStorage {
 
     private static final String TAG = "SecureStorage";
-    private static final String PREFS_FILE = "jellyfin_secure_prefs";
-    private static final String FALLBACK_PREFS_FILE = "jellyfin_secure_prefs_fallback";
+    private static final String PREFS_FILE = "plex_secure_prefs";
+    private static final String FALLBACK_PREFS_FILE = "plex_secure_prefs_fallback";
 
     private static volatile SharedPreferences instance;
 
@@ -28,13 +28,6 @@ public class SecureStorage {
         // Prevent instantiation
     }
 
-    /**
-     * Returns a singleton SharedPreferences instance backed by EncryptedSharedPreferences.
-     * If encryption fails, falls back to regular SharedPreferences.
-     *
-     * @param context Application or activity context
-     * @return SharedPreferences instance for storing credentials
-     */
     public static SharedPreferences getInstance(Context context) {
         if (instance == null) {
             synchronized (SecureStorage.class) {
@@ -46,14 +39,6 @@ public class SecureStorage {
         return instance;
     }
 
-    /**
-     * Returns a stable per device identifier, generating and storing one on first use.
-     * Kept in secure storage so it survives across sessions but never lands in the
-     * exportable default preferences.
-     *
-     * @param context Application or activity context
-     * @return A stable device id string
-     */
     public static String getDeviceId(Context context) {
         SharedPreferences prefs = getInstance(context);
         String deviceId = prefs.getString("device_id", "");
@@ -65,22 +50,33 @@ public class SecureStorage {
     }
 
     /**
-     * Removes any plaintext Jellyfin password left in the default SharedPreferences by
-     * older builds. The real value lives in secure storage; this only cleans up the
-     * plaintext copy and is a no op once it has run.
-     *
-     * @param context Application or activity context
+     * Removes any plaintext token left in the default SharedPreferences by older builds.
      */
     public static void removeLegacyPlaintextPassword(Context context) {
         try {
             SharedPreferences defaultPrefs =
                     PreferenceManager.getDefaultSharedPreferences(context.getApplicationContext());
+            boolean changed = false;
+            SharedPreferences.Editor editor = defaultPrefs.edit();
+            if (defaultPrefs.contains("plex_token")) {
+                editor.remove("plex_token");
+                changed = true;
+            }
+            if (defaultPrefs.contains("plex_access_token")) {
+                editor.remove("plex_access_token");
+                changed = true;
+            }
+            // Legacy Jellyfin keys from seed builds
             if (defaultPrefs.contains("jellyfin_password")) {
-                defaultPrefs.edit().remove("jellyfin_password").apply();
-                Log.i(TAG, "Removed a leftover plaintext password from default preferences");
+                editor.remove("jellyfin_password");
+                changed = true;
+            }
+            if (changed) {
+                editor.apply();
+                Log.i(TAG, "Removed leftover plaintext credentials from default preferences");
             }
         } catch (Exception e) {
-            Log.w(TAG, "Could not clean up the legacy password entry: " + e.getMessage());
+            Log.w(TAG, "Could not clean up legacy credential entries: " + e.getMessage());
         }
     }
 

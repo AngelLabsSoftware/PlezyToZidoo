@@ -2,7 +2,7 @@ name: Release APK
 
 # Tag-only. Does not run on PRs/branch pushes.
 # When PP2Z_KEYSTORE_* secrets are missing, exit green after tests and skip
-# signed publish so manual GitHub Releases (Adam's sideload APK) stay valid.
+# signed publish so manual GitHub Releases (sideload APK) stay valid.
 on:
   push:
     tags:

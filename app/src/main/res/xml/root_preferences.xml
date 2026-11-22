@@ -70,9 +70,32 @@
             android:title="@string/skip_credits_title"
             android:dependency="useZidooPlayer" />
 
+        <ListPreference
+            android:defaultValue="manual"
+            android:key="skip_behavior"
+            android:title="@string/skip_behavior_title"
+            android:summary="@string/skip_behavior_summary"
+            android:entries="@array/skip_behavior_entries"
+            android:entryValues="@array/skip_behavior_values"
+            android:dependency="useZidooPlayer" />
+
+        <Preference
+            android:key="overlay_permission"
+            android:persistent="false"
+            android:title="@string/overlay_permission_title"
+            android:summary="@string/overlay_permission_summary"
+            android:dependency="useZidooPlayer" />
+
     </PreferenceCategory>
 
     <PreferenceCategory app:title="@string/substitution_settings">
+
+        <Preference
+            android:key="path_sub_hint"
+            android:persistent="false"
+            android:title="@string/path_sub_hint_title"
+            android:summary="@string/path_sub_hint_summary"
+            android:selectable="false" />
 
         <Preference
             android:key="substitution_description"

@@ -3,11 +3,14 @@ package com.plezyplextozidoo;
 import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.View;
 import android.widget.Toast;
@@ -16,6 +19,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.EditTextPreference;
+import androidx.preference.ListPreference;
 import androidx.preference.Preference;
 import androidx.preference.PreferenceFragmentCompat;
 import androidx.preference.PreferenceManager;
@@ -97,6 +101,10 @@ public class SettingsActivity extends AppCompatActivity
     protected void onStart()
     {
         super.onStart();
+        if (settingsFragment != null && settingsFragment.findPreference("overlay_permission") != null)
+        {
+            setOverlayPermissionPreference();
+        }
     }
 
     @Override
@@ -132,6 +140,8 @@ public class SettingsActivity extends AppCompatActivity
         setPlexTokenPreference();
         setPlexServerUrlPreference();
         setTestConnectionPreference();
+        setSkipBehaviorPreference();
+        setOverlayPermissionPreference();
 
         Preference substitutionLink = settingsFragment.findPreference("substitution_link");
         if (substitutionLink != null)
@@ -183,6 +193,46 @@ public class SettingsActivity extends AppCompatActivity
             serverUrlPref.setText(value);
             serverUrlPref.setSummary(value.isEmpty() ? getString(R.string.plex_server_url_summary) : value);
             return false;
+        });
+    }
+
+    private void setSkipBehaviorPreference()
+    {
+        ListPreference skipBehavior = settingsFragment.findPreference("skip_behavior");
+        if (skipBehavior == null) return;
+
+        skipBehavior.setSummaryProvider(preference ->
+        {
+            CharSequence entry = ((ListPreference) preference).getEntry();
+            return entry != null ? entry : getString(R.string.skip_behavior_summary);
+        });
+    }
+
+    private void setOverlayPermissionPreference()
+    {
+        Preference overlayPref = settingsFragment.findPreference("overlay_permission");
+        if (overlayPref == null) return;
+
+        boolean allowed = SkipOverlay.canDrawOverlays(getApplicationContext());
+        overlayPref.setSummary(allowed
+                ? "Granted — Skip button can appear over Zidoo"
+                : getString(R.string.overlay_permission_summary));
+
+        overlayPref.setOnPreferenceClickListener(preference ->
+        {
+            try
+            {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                        Uri.parse("package:" + getPackageName()));
+                startActivity(intent);
+            }
+            catch (Exception e)
+            {
+                Toast.makeText(getApplicationContext(),
+                        "Open Settings → Apps → Special access → Display over other apps",
+                        Toast.LENGTH_LONG).show();
+            }
+            return true;
         });
     }
 

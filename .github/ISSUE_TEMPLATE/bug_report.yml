@@ -11,7 +11,7 @@ body:
           required: true
         - label: I am running the latest version of PlezyPlexToZidoo
           required: true
-        - label: I have redacted any personal information (IP addresses, usernames, passwords, file paths, server URLs) from this report
+        - label: I have redacted any personal information (IP addresses, tokens, passwords, file paths, server URLs) from this report
           required: true
 
   - type: input
@@ -19,7 +19,7 @@ body:
     attributes:
       label: PlezyPlexToZidoo version
       description: Found in Settings > Version
-      placeholder: "2026.03.1"
+      placeholder: "2026.11.1"
     validations:
       required: true
 
@@ -27,23 +27,23 @@ body:
     id: zidoo-model
     attributes:
       label: Zidoo model and firmware version
-      placeholder: "Z9X Pro, firmware 6.4.60"
+      placeholder: "Z9X 8K, firmware 1.1.x"
     validations:
       required: true
 
   - type: input
-    id: jellyfin-client
+    id: plex-client
     attributes:
-      label: Jellyfin client used
-      placeholder: "Jellyfin for Android TV / Moonfin / Findroid / other"
+      label: Plex / Plezy client used
+      placeholder: "Plezy / other"
     validations:
       required: true
 
   - type: input
-    id: jellyfin-server
+    id: plex-server
     attributes:
-      label: Jellyfin server version
-      placeholder: "10.9.0"
+      label: Plex Media Server version
+      placeholder: "1.40.x"
     validations:
       required: true
 
@@ -62,8 +62,8 @@ body:
       label: Steps to reproduce
       description: How can we reproduce this issue?
       placeholder: |
-        1. Open Jellyfin client
-        2. Play a video
+        1. Open Plezy
+        2. Play a video with external player
         3. ...
     validations:
       required: true
@@ -72,7 +72,7 @@ body:
     id: debug
     attributes:
       label: Debug output
-      description: If applicable, enable Debug data in settings and paste the debug screen info here. Make sure to redact any personal information such as IP addresses, file paths, or usernames.
+      description: If applicable, enable Debug data in settings and paste the debug screen info here. Make sure to redact any personal information such as IP addresses, tokens, file paths, or usernames.
       render: text
     validations:
       required: false

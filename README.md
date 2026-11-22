@@ -45,6 +45,8 @@ Refactored from [magnetgrouplabs/JellyfinToZidoo](https://github.com/magnetgroup
 1. Install the APK on the Zidoo.
 2. Open **PlezyPlexToZidoo** → configure path substitution (Plex file path prefix → `smb://…`) and optional SMB credentials.
 3. Optionally set fallback **Server URL** + **X-Plex-Token** (normally taken from the Plezy URI).
+4. Grant **Display over other apps** (Settings → Allow Skip overlay) so the Skip Intro/Credits button can appear over Zidoo. Choose **Skip Behavior**: Manual (default), Countdown, or Instant.
+5. Path tip for this Z9X: `/media/` → `/data/`.
 4. In Plezy, set this app as the external player.
 
 ## Build

@@ -9,6 +9,7 @@ import android.content.pm.PackageInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
@@ -101,15 +102,29 @@ public class Play extends AppCompatActivity
     // Intro/credit skip state
     private volatile boolean introSkipArmed = true;
     private volatile boolean creditSkipArmed = true;
+    private volatile boolean introOverlayDismissed = false;
+    private volatile boolean creditOverlayDismissed = false;
+    private volatile boolean introCountdownCancelled = false;
+    private volatile boolean creditCountdownCancelled = false;
     private volatile long introStartMs = -1, introEndMs = -1;
     private volatile long creditStartMs = -1, creditEndMs = -1;
     private volatile long lastPollPositionMs = -1;
+    private volatile boolean zidooPlaybackActive = false;
+
+    private SkipOverlay skipOverlay;
 
     private TextView textView1;
     private TextView textView2;
     private Button playButton;
 
     private boolean useNewZdiooPlayer = false;
+
+    /** Skip behavior preference values. */
+    static final String SKIP_BEHAVIOR_MANUAL = "manual";
+    static final String SKIP_BEHAVIOR_COUNTDOWN = "countdown";
+    static final String SKIP_BEHAVIOR_INSTANT = "instant";
+    /** Hide overlay this many ms before marker end. */
+    static final long SKIP_OVERLAY_END_MARGIN_MS = 1500L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState)
@@ -123,6 +138,131 @@ public class Play extends AppCompatActivity
         PlexApi.setClientIdentity(Build.MODEL, deviceId, BuildConfig.VERSION_NAME);
 
         setContentView(R.layout.activity_play);
+
+        skipOverlay = new SkipOverlay(this);
+        skipOverlay.setListener(new SkipOverlay.Listener() {
+            @Override
+            public void onSkipConfirmed(String segment) {
+                handleOverlaySkipConfirmed(segment);
+            }
+
+            @Override
+            public void onSkipDismissed(String segment) {
+                handleOverlaySkipDismissed(segment);
+            }
+
+            @Override
+            public void onCountdownCancelled(String segment) {
+                handleOverlayCountdownCancelled(segment);
+            }
+        });
+        maybePromptOverlayPermission();
+    }
+
+    private void maybePromptOverlayPermission()
+    {
+        String behavior = PreferenceManager.getDefaultSharedPreferences(getApplicationContext())
+                .getString("skip_behavior", SKIP_BEHAVIOR_MANUAL);
+        if (SKIP_BEHAVIOR_INSTANT.equals(behavior))
+        {
+            return;
+        }
+        if (SkipOverlay.canDrawOverlays(this))
+        {
+            return;
+        }
+        try
+        {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+            Toast.makeText(this,
+                    "Allow display over other apps for the Skip Intro/Credits button",
+                    Toast.LENGTH_LONG).show();
+        }
+        catch (Exception e)
+        {
+            Log.w("Play", "Could not open overlay permission settings: " + e.getMessage());
+        }
+    }
+
+    private String getSkipBehavior()
+    {
+        String behavior = PreferenceManager.getDefaultSharedPreferences(getApplicationContext())
+                .getString("skip_behavior", SKIP_BEHAVIOR_MANUAL);
+        if (behavior == null || behavior.isEmpty())
+        {
+            return SKIP_BEHAVIOR_MANUAL;
+        }
+        return behavior;
+    }
+
+    private void resetSkipOverlayState()
+    {
+        introOverlayDismissed = false;
+        creditOverlayDismissed = false;
+        introCountdownCancelled = false;
+        creditCountdownCancelled = false;
+        if (skipOverlay != null)
+        {
+            skipOverlay.hide();
+        }
+    }
+
+    private void handleOverlaySkipConfirmed(String segment)
+    {
+        if ("intro".equals(segment))
+        {
+            introSkipArmed = false;
+            if (introEndMs >= 0)
+            {
+                seekZidoo(introEndMs);
+            }
+        }
+        else if ("credits".equals(segment))
+        {
+            creditSkipArmed = false;
+            if (creditEndMs >= 0)
+            {
+                seekZidoo(creditEndMs);
+            }
+        }
+    }
+
+    private void handleOverlaySkipDismissed(String segment)
+    {
+        if ("intro".equals(segment))
+        {
+            introOverlayDismissed = true;
+            introSkipArmed = false;
+        }
+        else if ("credits".equals(segment))
+        {
+            creditOverlayDismissed = true;
+            creditSkipArmed = false;
+        }
+    }
+
+    private void handleOverlayCountdownCancelled(String segment)
+    {
+        if ("intro".equals(segment))
+        {
+            introCountdownCancelled = true;
+            introSkipArmed = false;
+        }
+        else if ("credits".equals(segment))
+        {
+            creditCountdownCancelled = true;
+            creditSkipArmed = false;
+        }
+    }
+
+    private void removeSkipOverlay()
+    {
+        if (skipOverlay != null)
+        {
+            skipOverlay.hide();
+        }
     }
 
     private boolean useNewZdiooPlayer()
@@ -164,6 +304,8 @@ public class Play extends AppCompatActivity
 
     private static final Pattern SMB_CREDENTIALS_PATTERN = Pattern.compile("smb://([^:/@]+):[^@/]*@");
     private static final Pattern API_KEY_PATTERN = Pattern.compile("(?i)([?&](?:X-Plex-Token|api_key|ApiKey)=)[^&\\s]*");
+    private static final Pattern LITERAL_TOKEN_PLACEHOLDER =
+            Pattern.compile("(?i)([?&](?:X-Plex-Token|api_key|ApiKey)=)(?:<token>|\\*\\*\\*)");
 
     static String maskCredentials(String value)
     {
@@ -180,7 +322,84 @@ public class Play extends AppCompatActivity
         {
             return value;
         }
-        return API_KEY_PATTERN.matcher(value).replaceAll("$1<token>");
+        // On-screen debug must never show a real token, and must not look like a literal URI value.
+        return API_KEY_PATTERN.matcher(value).replaceAll("$1***");
+    }
+
+    /**
+     * When path substitution fails, fall back to the original Intent.data URI (which already has
+     * the real X-Plex-Token) or inject the resolved plex token. Never leaves a literal
+     * {@code X-Plex-Token=<token>} / {@code ***} placeholder in the playback URI.
+     */
+    static String resolveFallbackPlaybackUri(String originalDataUri, String plexToken)
+    {
+        if (originalDataUri == null || originalDataUri.isEmpty())
+        {
+            return "";
+        }
+
+        String uri = LITERAL_TOKEN_PLACEHOLDER.matcher(originalDataUri).replaceAll("$1");
+        // Clean dangling ? or & left by placeholder stripping
+        uri = uri.replaceAll("\\?&", "?").replaceAll("[?&]$", "");
+
+        String existing = PlexApi.extractTokenFromUrl(uri);
+        if (existing != null && !existing.isEmpty()
+                && !"<token>".equals(existing) && !"***".equals(existing))
+        {
+            return uri;
+        }
+
+        if (plexToken == null || plexToken.isEmpty())
+        {
+            return uri;
+        }
+
+        // Strip any empty/placeholder token param before injecting the real one
+        uri = API_KEY_PATTERN.matcher(uri).replaceAll("$1");
+        uri = uri.replaceAll("\\?&", "?").replaceAll("[?&]$", "");
+        if (uri.contains("?"))
+        {
+            return uri + (uri.endsWith("?") || uri.endsWith("&") ? "" : "&")
+                    + "X-Plex-Token=" + plexToken;
+        }
+        return uri + "?X-Plex-Token=" + plexToken;
+    }
+
+    static boolean isWithinSkipOverlayWindow(long positionMs, long startMs, long endMs)
+    {
+        if (startMs < 0 || endMs < 0 || endMs <= startMs)
+        {
+            return false;
+        }
+        long hideAt = endMs - SKIP_OVERLAY_END_MARGIN_MS;
+        if (hideAt <= startMs)
+        {
+            hideAt = endMs;
+        }
+        return positionMs >= startMs && positionMs < hideAt;
+    }
+
+    /**
+     * Zidoo play-status helpers: treat playing and paused as active; stop/idle as inactive.
+     * When status is absent, a non-empty path with a position is assumed active.
+     */
+    static boolean isZidooPlaybackActive(Integer statusCode, String statusText,
+            String path, boolean hasPosition)
+    {
+        if (statusText != null && !statusText.isEmpty())
+        {
+            String s = statusText.trim().toLowerCase(Locale.ENGLISH);
+            if (s.contains("play")) return true;
+            if (s.contains("pause")) return true;
+            if (s.contains("stop") || s.contains("idle") || s.contains("end")) return false;
+        }
+        if (statusCode != null)
+        {
+            // Observed Zidoo values: 0=stop/idle, 1=playing, 2=paused (also accept 3=pause variants)
+            if (statusCode == 0) return false;
+            if (statusCode == 1 || statusCode == 2 || statusCode == 3) return true;
+        }
+        return hasPosition && path != null && !path.trim().isEmpty();
     }
 
     private void updateDebugPage()
@@ -225,11 +444,27 @@ public class Play extends AppCompatActivity
             pathToPrint, videoPath, viewOffset,
             selectedAudioIndex, selectedSubtitleIndex,
             useNewZdiooPlayer, newIntentToPrint);
-        textView2.setText(debugText);
+        textView2.setText(maskTokens(debugText));
+    }
+
+    private void applySubstitutionFallbackIfNeeded()
+    {
+        if (foundSubstitution)
+        {
+            return;
+        }
+        String originalData = originalIntent != null ? originalIntent.getDataString() : null;
+        if (originalData == null || originalData.isEmpty())
+        {
+            originalData = directPath;
+        }
+        directPath = resolveFallbackPlaybackUri(originalData, accessToken);
     }
 
     private void showDebugPageOrSendIntent()
     {
+        applySubstitutionFallbackIfNeeded();
+
         if(PreferenceManager.getDefaultSharedPreferences(getApplicationContext()).getBoolean("useZidooPlayer", true))
         {
             buildZidooIntent(directPath, viewOffset);
@@ -724,6 +959,7 @@ public class Play extends AppCompatActivity
                                     introStartMs = -1; introEndMs = -1;
                                     creditStartMs = -1; creditEndMs = -1;
                                     lastPollPositionMs = -1;
+                                    runOnUiThread(this::resetSkipOverlayState);
 
                                     String[][] subRules = getSubstitutionRules();
                                     String reversedPath = PlexApi.reverseSubstitution(nowPlayingPath, subRules);
@@ -791,11 +1027,27 @@ public class Play extends AppCompatActivity
                                     lastKnownDurationMs = video.get("duration").getAsLong();
                                 }
 
+                                Integer statusCode = null;
+                                String statusText = null;
+                                if (video.has("status")) {
+                                    try {
+                                        if (video.get("status").isJsonPrimitive()
+                                                && video.get("status").getAsJsonPrimitive().isNumber()) {
+                                            statusCode = video.get("status").getAsInt();
+                                        } else {
+                                            statusText = video.get("status").getAsString();
+                                        }
+                                    } catch (Exception ignored) {
+                                    }
+                                }
+
                                 if (video.has("currentPosition")) {
                                     long currentPositionMs = video.get("currentPosition").getAsLong();
                                     lastKnownPositionMs = currentPositionMs;
 
                                     boolean playerPaused = isPlayerPaused(lastPollPositionMs, currentPositionMs);
+                                    zidooPlaybackActive = isZidooPlaybackActive(statusCode, statusText,
+                                            nowPlayingPath, true);
 
                                     // Report timeline to Plex ~every 10s
                                     long nowWall = System.currentTimeMillis();
@@ -816,12 +1068,13 @@ public class Play extends AppCompatActivity
 
                                     long remainingMs = lastKnownDurationMs - currentPositionMs;
                                     Log.d("Play", "Poll: pos=" + currentPositionMs + " dur=" + lastKnownDurationMs
-                                            + " remaining=" + remainingMs + "ms");
+                                            + " remaining=" + remainingMs + "ms active=" + zidooPlaybackActive);
 
                                     android.content.SharedPreferences prefs =
                                             androidx.preference.PreferenceManager.getDefaultSharedPreferences(Play.this);
                                     boolean skipIntrosEnabled = prefs.getBoolean("skip_intros", true);
                                     boolean skipCreditsEnabled = prefs.getBoolean("skip_credits", true);
+                                    String skipBehavior = getSkipBehavior();
 
                                     if (lastPollPositionMs >= 0) {
                                         long positionDelta = currentPositionMs - lastPollPositionMs;
@@ -836,35 +1089,17 @@ public class Play extends AppCompatActivity
                                                 creditSkipArmed = false;
                                                 Log.d("Play", "Credit skip disarmed (manual seek to " + currentPositionMs + "ms)");
                                             }
+                                            runOnUiThread(this::removeSkipOverlay);
                                         }
                                     }
 
-                                    if (skipIntrosEnabled && introSkipArmed && introStartMs >= 0
-                                            && lastPollPositionMs >= 0
-                                            && currentPositionMs >= introStartMs && currentPositionMs < introEndMs) {
-                                        Log.d("Play", "Skipping intro: seeking from " + currentPositionMs + "ms to " + introEndMs + "ms");
-                                        seekZidoo(introEndMs);
-                                        introSkipArmed = false;
-                                    }
-
-                                    if (skipCreditsEnabled && creditSkipArmed && creditStartMs >= 0
-                                            && lastPollPositionMs >= 0
-                                            && !seriesRatingKey.isEmpty()
-                                            && currentPositionMs >= creditStartMs
-                                            && !upNextTriggered) {
-                                        Log.d("Play", "Credits reached at " + currentPositionMs + "ms, triggering Up Next");
-                                        upNextTriggered = true;
-                                        creditSkipArmed = false;
-                                        runOnUiThread(() -> {
-                                            try {
-                                                finishActivity(98);
-                                            } catch (Exception e) {
-                                                Log.w("Play", "Credit skip: finishActivity failed: " + e.getMessage());
-                                            }
-                                        });
-                                    }
+                                    handleSkipDuringPoll(currentPositionMs, skipIntrosEnabled, skipCreditsEnabled,
+                                            skipBehavior);
 
                                     lastPollPositionMs = currentPositionMs;
+                                } else if (!isZidooPlaybackActive(statusCode, statusText, nowPlayingPath, false)) {
+                                    zidooPlaybackActive = false;
+                                    runOnUiThread(this::removeSkipOverlay);
                                 }
                             }
                         }
@@ -990,9 +1225,110 @@ public class Play extends AppCompatActivity
             progressPoller.shutdownNow();
             progressPoller = null;
         }
+        removeSkipOverlay();
+    }
+
+    /**
+     * Intro/credits skip based on Settings "Skip Behavior".
+     * Instant keeps prior auto-seek / Up Next behavior. Manual and countdown use the overlay.
+     */
+    private void handleSkipDuringPoll(long currentPositionMs, boolean skipIntrosEnabled,
+                                      boolean skipCreditsEnabled, String skipBehavior) {
+        if (!zidooPlaybackActive || lastPollPositionMs < 0) {
+            runOnUiThread(this::removeSkipOverlay);
+            return;
+        }
+
+        boolean inIntro = skipIntrosEnabled && introSkipArmed && !introOverlayDismissed
+                && !introCountdownCancelled
+                && isWithinSkipOverlayWindow(currentPositionMs, introStartMs, introEndMs);
+        boolean inCreditsWindow = skipCreditsEnabled && creditSkipArmed && !creditOverlayDismissed
+                && !creditCountdownCancelled && creditStartMs >= 0
+                && isWithinSkipOverlayWindow(currentPositionMs, creditStartMs,
+                creditEndMs > creditStartMs ? creditEndMs : creditStartMs + 60000);
+
+        // Instant auto-skip (existing behavior)
+        if (SKIP_BEHAVIOR_INSTANT.equals(skipBehavior)) {
+            runOnUiThread(this::removeSkipOverlay);
+
+            if (skipIntrosEnabled && introSkipArmed && introStartMs >= 0
+                    && currentPositionMs >= introStartMs && currentPositionMs < introEndMs) {
+                Log.d("Play", "Skipping intro: seeking from " + currentPositionMs + "ms to " + introEndMs + "ms");
+                seekZidoo(introEndMs);
+                introSkipArmed = false;
+            }
+
+            if (skipCreditsEnabled && creditSkipArmed && creditStartMs >= 0
+                    && !seriesRatingKey.isEmpty()
+                    && currentPositionMs >= creditStartMs
+                    && !upNextTriggered) {
+                Log.d("Play", "Credits reached at " + currentPositionMs + "ms, triggering Up Next");
+                upNextTriggered = true;
+                creditSkipArmed = false;
+                runOnUiThread(() -> {
+                    try {
+                        finishActivity(98);
+                    } catch (Exception e) {
+                        Log.w("Play", "Credit skip: finishActivity failed: " + e.getMessage());
+                    }
+                });
+            }
+            return;
+        }
+
+        // Past the marker window → hide overlay
+        if (!inIntro && !inCreditsWindow) {
+            runOnUiThread(this::removeSkipOverlay);
+            return;
+        }
+
+        // Prefer intro over credits if somehow overlapping
+        final String segment = inIntro ? "intro" : "credits";
+        final String label = inIntro ? "Skip Intro" : "Skip Credits";
+        final String kindLabel = inIntro ? "Intro" : "Credits";
+        final boolean overlayAllowed = SkipOverlay.canDrawOverlays(getApplicationContext());
+
+        if (!overlayAllowed) {
+            // Without overlay permission, fall back to instant for this segment once
+            if (inIntro && introSkipArmed) {
+                Log.d("Play", "No overlay permission; instant-skipping intro");
+                seekZidoo(introEndMs);
+                introSkipArmed = false;
+            } else if (inCreditsWindow && creditSkipArmed && creditEndMs >= 0) {
+                Log.d("Play", "No overlay permission; instant-skipping credits");
+                seekZidoo(creditEndMs);
+                creditSkipArmed = false;
+            }
+            return;
+        }
+
+        if (SKIP_BEHAVIOR_COUNTDOWN.equals(skipBehavior)) {
+            runOnUiThread(() -> {
+                if (skipOverlay == null) return;
+                if (skipOverlay.isShowing()
+                        && segment.equals(skipOverlay.getActiveSegment())
+                        && skipOverlay.isCountdownMode()) {
+                    return; // already counting this segment
+                }
+                skipOverlay.showCountdown(segment, kindLabel, 3);
+            });
+            return;
+        }
+
+        // Manual (default)
+        runOnUiThread(() -> {
+            if (skipOverlay == null) return;
+            if (skipOverlay.isShowing()
+                    && segment.equals(skipOverlay.getActiveSegment())
+                    && !skipOverlay.isCountdownMode()) {
+                return;
+            }
+            skipOverlay.showManual(segment, label);
+        });
     }
 
     private void finishWithResult() {
+        removeSkipOverlay();
         if (!plexRatingKey.isEmpty() && !serverUrl.isEmpty()) {
             Intent resultData = new Intent();
             resultData.setData(Uri.parse(serverUrl + "/library/metadata/" + plexRatingKey));
@@ -1007,14 +1343,20 @@ public class Play extends AppCompatActivity
     @Override
     protected void onDestroy()
     {
-        super.onDestroy();
+        removeSkipOverlay();
+        if (skipOverlay != null) {
+            skipOverlay.destroy();
+            skipOverlay = null;
+        }
         stopProgressPoller();
+        super.onDestroy();
     }
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data)
     {
         super.onActivityResult(requestCode, resultCode, data);
+        removeSkipOverlay();
 
         if (requestCode == UP_NEXT_REQUEST_CODE) {
             waitingForUpNext = false;
@@ -1041,6 +1383,7 @@ public class Play extends AppCompatActivity
                 creditStartMs = -1; creditEndMs = -1;
                 lastPollPositionMs = -1;
                 lastTimelineReportMs = 0;
+                resetSkipOverlayState();
 
                 Log.d("Play", "Play Now: nextServerPath=" + nextServerPath);
                 foundSubstitution = false;

@@ -16,6 +16,12 @@
     <string name="showTitle_title">Show title when zidoo player starts</string>
     <string name="skip_intros_title">Skip intros</string>
     <string name="skip_credits_title">Skip credits</string>
+    <string name="skip_behavior_title">Skip Behavior</string>
+    <string name="skip_behavior_summary">Manual button (default), countdown, or instant auto-skip</string>
+    <string name="overlay_permission_title">Allow Skip overlay</string>
+    <string name="overlay_permission_summary">Required for Skip Intro/Credits button over the Zidoo player</string>
+    <string name="path_sub_hint_title">Path tip</string>
+    <string name="path_sub_hint_summary">On this Z9X, a working substitution is /media/ → /data/</string>
     <!-- Plex Preferences -->
     <string name="plex_server_settings">Plex Server (fallbacks)</string>
     <string name="plex_server_url_title">Server URL</string>

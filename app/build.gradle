@@ -1,0 +1,74 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace "com.plezyplextozidoo"
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.plezyplextozidoo"
+        minSdkVersion 28
+        targetSdkVersion 28
+        versionCode 20261122
+        versionName "2026.11.1"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+
+        ndk {
+            abiFilters "armeabi-v7a"
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    applicationVariants.all { variant ->
+        variant.resValue "string", "versionName", variant.versionName
+    }
+
+    signingConfigs {
+        release {
+            def ksPath = System.getenv("PP2Z_KEYSTORE_PATH")
+            if (ksPath) {
+                storeFile file(ksPath)
+                storePassword System.getenv("PP2Z_KEYSTORE_PASSWORD")
+                keyAlias System.getenv("PP2Z_KEY_ALIAS")
+                keyPassword System.getenv("PP2Z_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (System.getenv("PP2Z_KEYSTORE_PATH")) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+    lint {
+        disable 'ExpiredTargetSdkVersion'
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+
+    implementation 'androidx.appcompat:appcompat:1.2.0'
+    implementation 'com.google.android.material:material:1.2.1'
+    implementation 'androidx.preference:preference:1.1.1'
+    implementation 'androidx.constraintlayout:constraintlayout:2.0.4'
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'androidx.security:security-crypto:1.1.0'
+    testImplementation 'junit:junit:4.13.2'
+    implementation 'com.google.code.gson:gson:2.13.1'
+    implementation 'com.github.bumptech.glide:glide:4.16.0'
+    annotationProcessor 'com.github.bumptech.glide:compiler:4.16.0'
+    implementation 'jp.wasabeef:glide-transformations:4.3.0'
+}

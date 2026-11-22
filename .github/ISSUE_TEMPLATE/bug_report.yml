@@ -7,9 +7,9 @@ body:
     attributes:
       label: Before submitting
       options:
-        - label: I have searched the [existing issues](https://github.com/magnetgrouplabs/JellyfinToZidoo/issues) and confirmed this is not a duplicate
+        - label: I have searched the [existing issues](https://github.com/magnetgrouplabs/PlezyPlexToZidoo/issues) and confirmed this is not a duplicate
           required: true
-        - label: I am running the latest version of JellyfinToZidoo
+        - label: I am running the latest version of PlezyPlexToZidoo
           required: true
         - label: I have redacted any personal information (IP addresses, usernames, passwords, file paths, server URLs) from this report
           required: true
@@ -17,7 +17,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: JellyfinToZidoo version
+      label: PlezyPlexToZidoo version
       description: Found in Settings > Version
       placeholder: "2026.03.1"
     validations:

@@ -1,4 +1,4 @@
-package com.jellyfintozidoo;
+package com.plezyplextozidoo;
 
 import android.content.Intent;
 import android.os.Bundle;
@@ -20,26 +20,21 @@ import jp.wasabeef.glide.transformations.BlurTransformation;
 
 /**
  * Up Next countdown screen for episode auto-advance.
- * Shows blurred series backdrop with episode info card and 10-second countdown.
- * D-pad navigable: Play Now (default focus) and Cancel buttons.
  *
  * Launch with intent extras:
  *   seriesName, episodeName, seasonNumber, episodeNumber,
- *   nextItemId, serverPath, seriesId, backdropUrl, serverUrl
- *
- * Returns RESULT_OK with extras (nextItemId, serverPath, seriesId, episodeName,
- * seasonNumber, episodeNumber) when countdown finishes or Play Now is pressed.
- * Returns RESULT_CANCELED when Cancel is pressed.
+ *   nextItemId, serverPath, seriesId, seasonId, serverUrl, accessToken,
+ *   optional backdropUrl / thumbUrl
  */
 public class UpNextActivity extends AppCompatActivity {
 
     private CountDownTimer countDownTimer;
     private boolean cancelled = false;
 
-    // Intent extra keys
     private String nextItemId;
     private String serverPath;
     private String seriesId;
+    private String seasonId;
     private String episodeName;
     private int seasonNumber;
     private int episodeNumber;
@@ -49,7 +44,6 @@ public class UpNextActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_up_next);
 
-        // Read intent extras
         Intent intent = getIntent();
         String seriesName = intent.getStringExtra("seriesName");
         episodeName = intent.getStringExtra("episodeName");
@@ -58,10 +52,12 @@ public class UpNextActivity extends AppCompatActivity {
         nextItemId = intent.getStringExtra("nextItemId");
         serverPath = intent.getStringExtra("serverPath");
         seriesId = intent.getStringExtra("seriesId");
+        seasonId = intent.getStringExtra("seasonId");
         String backdropUrl = intent.getStringExtra("backdropUrl");
+        String thumbUrl = intent.getStringExtra("thumbUrl");
         String serverUrl = intent.getStringExtra("serverUrl");
+        String accessToken = intent.getStringExtra("accessToken");
 
-        // Bind views
         ImageView backdropImageView = findViewById(R.id.backdrop);
         ImageView episodeThumbnail = findViewById(R.id.episodeThumbnail);
         TextView seriesNameView = findViewById(R.id.seriesName);
@@ -70,17 +66,24 @@ public class UpNextActivity extends AppCompatActivity {
         Button btnPlayNow = findViewById(R.id.btnPlayNow);
         Button btnCancel = findViewById(R.id.btnCancel);
 
-        // Set text
         seriesNameView.setText(seriesName != null ? seriesName : "");
         String episodeInfoText = String.format("S%02dE%02d - %s",
                 seasonNumber, episodeNumber, episodeName != null ? episodeName : "");
         episodeInfoView.setText(episodeInfoText);
 
-        // Load blurred backdrop (memory-constrained for Zidoo Z9X Pro)
+        // Prefer explicit URLs; otherwise build from Plex metadata paths
+        if ((backdropUrl == null || backdropUrl.isEmpty()) && serverUrl != null && seriesId != null) {
+            backdropUrl = PlexApi.buildImageUrl(serverUrl,
+                    "/library/metadata/" + seriesId + "/art", accessToken);
+        }
+        if ((thumbUrl == null || thumbUrl.isEmpty()) && serverUrl != null && nextItemId != null) {
+            thumbUrl = PlexApi.buildImageUrl(serverUrl,
+                    "/library/metadata/" + nextItemId + "/thumb", accessToken);
+        }
+
         if (backdropUrl != null && !backdropUrl.isEmpty()) {
-            String url = backdropUrl + "?maxWidth=1280";
             Glide.with(this)
-                    .load(url)
+                    .load(backdropUrl)
                     .apply(new RequestOptions()
                             .override(1280, 720)
                             .transform(new BlurTransformation(25, 3))
@@ -88,11 +91,9 @@ public class UpNextActivity extends AppCompatActivity {
                     .into(backdropImageView);
         }
 
-        // Load episode thumbnail (primary image)
-        if (serverUrl != null && nextItemId != null) {
-            String thumbnailUrl = serverUrl + "/Items/" + nextItemId + "/Images/Primary?maxWidth=640";
+        if (thumbUrl != null && !thumbUrl.isEmpty()) {
             Glide.with(this)
-                    .load(thumbnailUrl)
+                    .load(thumbUrl)
                     .apply(new RequestOptions()
                             .override(640, 360)
                             .transform(new RoundedCorners(16))
@@ -100,7 +101,6 @@ public class UpNextActivity extends AppCompatActivity {
                     .into(episodeThumbnail);
         }
 
-        // Start 10-second countdown
         countdownView.setText("Playing in 10");
         countDownTimer = new CountDownTimer(10000, 1000) {
             @Override
@@ -116,7 +116,6 @@ public class UpNextActivity extends AppCompatActivity {
             }
         }.start();
 
-        // Play Now — skip countdown
         btnPlayNow.setOnClickListener(v -> {
             cancelled = true;
             if (countDownTimer != null) {
@@ -125,7 +124,6 @@ public class UpNextActivity extends AppCompatActivity {
             launchNextEpisode();
         });
 
-        // Cancel — return to calling activity
         btnCancel.setOnClickListener(v -> {
             cancelled = true;
             if (countDownTimer != null) {
@@ -135,19 +133,16 @@ public class UpNextActivity extends AppCompatActivity {
             finish();
         });
 
-        // Default focus on Play Now for D-pad navigation
         btnPlayNow.requestFocus();
         Log.d("UpNext", "Screen displayed: " + seriesName + " S" + seasonNumber + "E" + episodeNumber);
     }
 
-    /**
-     * Sets result with next episode metadata and finishes.
-     */
     private void launchNextEpisode() {
         Intent resultIntent = new Intent();
         resultIntent.putExtra("nextItemId", nextItemId);
         resultIntent.putExtra("serverPath", serverPath);
         resultIntent.putExtra("seriesId", seriesId);
+        resultIntent.putExtra("seasonId", seasonId);
         resultIntent.putExtra("episodeName", episodeName);
         resultIntent.putExtra("seasonNumber", seasonNumber);
         resultIntent.putExtra("episodeNumber", episodeNumber);
@@ -158,7 +153,6 @@ public class UpNextActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        // Prevent zombie countdown launches
         if (countDownTimer != null) {
             countDownTimer.cancel();
             countDownTimer = null;

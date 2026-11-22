@@ -2,38 +2,31 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/root_preferences">
 
-    <PreferenceCategory app:title="@string/jellyfin_server_settings">
+    <PreferenceCategory app:title="@string/plex_server_settings">
 
         <EditTextPreference
             android:defaultValue=""
-            android:key="jellyfin_server_url"
-            android:title="@string/jellyfin_server_url_title"
-            android:summary="@string/jellyfin_server_url_summary"
+            android:key="plex_server_url"
+            android:title="@string/plex_server_url_title"
+            android:summary="@string/plex_server_url_summary"
             app:useSimpleSummaryProvider="false"
             android:singleLine="true" />
 
+        <!-- Not persistent: the value is written to encrypted storage -->
         <EditTextPreference
             android:defaultValue=""
-            android:key="jellyfin_username"
-            android:title="@string/jellyfin_username_title"
-            app:useSimpleSummaryProvider="true"
-            android:singleLine="true" />
-
-        <!-- Not persistent: the value is written to encrypted storage, never to the
-             default preferences file -->
-        <EditTextPreference
-            android:defaultValue=""
-            android:key="jellyfin_password"
+            android:key="plex_token"
             android:persistent="false"
-            android:title="@string/jellyfin_password_title"
+            android:title="@string/plex_token_title"
+            android:summary="@string/plex_token_summary"
             app:useSimpleSummaryProvider="false"
             android:singleLine="true"
             android:inputType="textPassword" />
 
         <Preference
-            android:key="jellyfin_login"
-            android:title="@string/jellyfin_login_title"
-            android:summary="@string/jellyfin_login_summary" />
+            android:key="plex_test_connection"
+            android:title="@string/plex_test_connection_title"
+            android:summary="@string/plex_test_connection_summary" />
 
     </PreferenceCategory>
 

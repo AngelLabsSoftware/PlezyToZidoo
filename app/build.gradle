@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id 'com.android.application'
 }
@@ -31,13 +33,15 @@ android {
 
     // Signing priority:
     // 1) CI / release secrets via PP2Z_* env vars
-    // 2) Project-local private sideload keystore (keystore/pp2z-private-release.jks)
+    // 2) Project-local private sideload keystore + gitignored keystore/keystore.properties
     // 3) Android debug keystore (local installs only)
     // The local keystore is a PRIVATE TEST / SIDELOAD key — not for Play Store.
+    // Never hardcode store/key passwords in this file.
     signingConfigs {
         release {
             def ksPath = System.getenv("PP2Z_KEYSTORE_PATH")
             def localKs = rootProject.file("keystore/pp2z-private-release.jks")
+            def localPropsFile = rootProject.file("keystore/keystore.properties")
             def debugKs = file("${System.getProperty('user.home')}/.android/debug.keystore")
 
             // Enable JAR + APK Signature Scheme v2 for sideload friendliness on OEM boxes.
@@ -49,12 +53,21 @@ android {
                 storePassword System.getenv("PP2Z_KEYSTORE_PASSWORD")
                 keyAlias System.getenv("PP2Z_KEY_ALIAS")
                 keyPassword System.getenv("PP2Z_KEY_PASSWORD")
-            } else if (localKs.exists()) {
-                storeFile localKs
-                // Private sideload credentials — see keystore/README.md
-                storePassword "[REDACTED]"
-                keyAlias "pp2z"
-                keyPassword "[REDACTED]"
+            } else if (localKs.exists() && localPropsFile.exists()) {
+                def localProps = new Properties()
+                localPropsFile.withInputStream { localProps.load(it) }
+                def storePass = localProps.getProperty("storePassword")
+                def keyPass = localProps.getProperty("keyPassword")
+                def alias = localProps.getProperty("keyAlias", "pp2z")
+                if (storePass && keyPass) {
+                    storeFile localKs
+                    storePassword storePass
+                    keyAlias alias
+                    keyPassword keyPass
+                } else {
+                    throw new GradleException(
+                            "keystore/keystore.properties is missing storePassword or keyPassword. See keystore/README.md")
+                }
             } else if (debugKs.exists()) {
                 storeFile debugKs
                 storePassword "android"

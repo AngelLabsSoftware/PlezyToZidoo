@@ -127,6 +127,7 @@
         <EditTextPreference
             android:defaultValue=""
             android:key="smbPassword"
+            android:persistent="false"
             android:title="@string/smbPassword_title"
             app:useSimpleSummaryProvider="false"
             android:singleLine="true"
@@ -160,6 +161,7 @@
         <EditTextPreference
             android:defaultValue=""
             android:key="smbPassword_02"
+            android:persistent="false"
             android:title="@string/smbPassword_title"
             app:useSimpleSummaryProvider="false"
             android:singleLine="true"
@@ -168,6 +170,49 @@
         <Preference
             android:key="substitution_link"
             android:title="@string/substitution_link_more" />
+
+    </PreferenceCategory>
+
+    <PreferenceCategory app:title="@string/screensaver_settings">
+
+        <Preference
+            android:key="screensaver_how_to"
+            android:persistent="false"
+            android:title="@string/screensaver_how_to_title"
+            android:summary="@string/screensaver_how_to_summary"
+            android:selectable="false" />
+
+        <ListPreference
+            android:defaultValue="20"
+            android:key="screensaver_interval_sec"
+            android:title="@string/screensaver_interval_title"
+            android:summary="@string/screensaver_interval_summary"
+            android:entries="@array/screensaver_interval_entries"
+            android:entryValues="@array/screensaver_interval_values" />
+
+        <SwitchPreference
+            android:defaultValue="false"
+            android:key="screensaver_allow_lower_res"
+            android:title="@string/screensaver_allow_lower_res_title"
+            android:summary="@string/screensaver_allow_lower_res_summary" />
+
+        <SwitchPreference
+            android:defaultValue="true"
+            android:key="screensaver_show_logo"
+            android:title="@string/screensaver_show_logo_title"
+            android:summary="@string/screensaver_show_logo_summary" />
+
+        <SwitchPreference
+            android:defaultValue="true"
+            android:key="screensaver_show_date"
+            android:title="@string/screensaver_show_date_title"
+            android:summary="@string/screensaver_show_date_summary" />
+
+        <Preference
+            android:key="screensaver_preview"
+            android:persistent="false"
+            android:title="@string/screensaver_preview_title"
+            android:summary="@string/screensaver_preview_summary" />
 
     </PreferenceCategory>
 

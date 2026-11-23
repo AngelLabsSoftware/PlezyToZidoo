@@ -354,7 +354,20 @@ public class PlexApi {
     static String baseUrl(String serverUrl) {
         if (serverUrl == null) return "";
         String trimmed = serverUrl.trim();
-        return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+        // Strip trailing slashes.
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        // Browser "Plex Web" paths are not the PMS API root; /web/... returns HTML.
+        if (trimmed.toLowerCase(Locale.ROOT).endsWith("/web/index.html")) {
+            trimmed = trimmed.substring(0, trimmed.length() - "/web/index.html".length());
+        } else if (trimmed.toLowerCase(Locale.ROOT).endsWith("/web")) {
+            trimmed = trimmed.substring(0, trimmed.length() - "/web".length());
+        }
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
     }
 
     /**
@@ -612,16 +625,49 @@ public class PlexApi {
         return new JsonArray();
     }
 
+    /** Strips a leading UTF-8 BOM so sniffing/parsing see the real payload. */
+    static String stripBom(String body) {
+        if (body != null && !body.isEmpty() && body.charAt(0) == '\uFEFF') {
+            return body.substring(1);
+        }
+        return body;
+    }
+
+    /**
+     * Classifies a Plex HTTP body without logging contents.
+     * Values: empty | json | xml | html | other
+     */
+    static String classifyBodyKind(String body) {
+        String s = stripBom(body);
+        if (s == null) return "empty";
+        int i = 0;
+        while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+        if (i >= s.length()) return "empty";
+        char c = s.charAt(i);
+        if (c == '{' || c == '[') return "json";
+        if (c == '<') {
+            // HTML gate / Plex Web — must not be fed to the PMS XML parser (11.4 failure mode).
+            String head = s.substring(i, Math.min(i + 64, s.length())).toLowerCase(Locale.ROOT);
+            if (head.startsWith("<!doctype html")
+                    || head.startsWith("<html")
+                    || head.startsWith("<head")
+                    || head.startsWith("<body")
+                    || head.contains("<html")) {
+                return "html";
+            }
+            return "xml";
+        }
+        return "other";
+    }
+
     /** True when the body looks like XML (PMS default when Accept: json is ignored). */
     static boolean looksLikeXml(String body) {
-        if (body == null) return false;
-        for (int i = 0; i < body.length(); i++) {
-            char c = body.charAt(i);
-            if (!Character.isWhitespace(c)) {
-                return c == '<';
-            }
-        }
-        return false;
+        return "xml".equals(classifyBodyKind(body));
+    }
+
+    /** True when the body is an HTML page (proxy gate, /web UI, etc.). */
+    static boolean looksLikeHtml(String body) {
+        return "html".equals(classifyBodyKind(body));
     }
 
     private static Document parseXmlDocument(String body) throws Exception {
@@ -636,22 +682,31 @@ public class PlexApi {
             // Some Android DocumentBuilderFactory implementations omit these features.
         }
         DocumentBuilder builder = factory.newDocumentBuilder();
-        return builder.parse(new InputSource(new StringReader(body)));
+        return builder.parse(new InputSource(new StringReader(stripBom(body))));
     }
 
     /**
      * Parses {@code /library/sections} as JSON or XML.
      * Does not log the body (may contain library titles); never logs tokens.
+     * Rejects HTML explicitly — the 11.4 XML path mis-handled HTML as XML.
      */
     static List<LibrarySection> parseLibrarySections(String body) {
         List<LibrarySection> out = new ArrayList<>();
-        if (body == null || body.trim().isEmpty()) {
+        String kind = classifyBodyKind(body);
+        if ("empty".equals(kind)) {
             return out;
         }
-        if (looksLikeXml(body)) {
-            return parseLibrarySectionsXml(body);
+        if ("html".equals(kind)) {
+            throw new IllegalArgumentException(
+                    "Plex returned HTML instead of library sections");
         }
-        return parseLibrarySectionsJson(body);
+        if ("xml".equals(kind)) {
+            return parseLibrarySectionsXml(stripBom(body));
+        }
+        if ("json".equals(kind)) {
+            return parseLibrarySectionsJson(stripBom(body));
+        }
+        throw new IllegalArgumentException("Unrecognized Plex sections payload (" + kind + ")");
     }
 
     private static List<LibrarySection> parseLibrarySectionsJson(String body) {
@@ -763,9 +818,38 @@ public class PlexApi {
 
     // --- HTTP helpers ---
 
+    /**
+     * Ensures {@code X-Plex-Token} is present as a query parameter.
+     * Playback / image URLs already use query tokens; header-only GETs fail when a
+     * reverse proxy strips custom headers and returns an HTML gate with HTTP 200.
+     * Never log the returned URL (contains the token).
+     */
+    static String urlWithQueryToken(String url, String token) {
+        if (url == null || url.isEmpty()) return url == null ? "" : url;
+        if (token == null || token.isEmpty()) return url;
+        if (TOKEN_PATTERN.matcher(url).find()) return url;
+        return url + (url.contains("?") ? "&" : "?") + "X-Plex-Token=" + token;
+    }
+
+    /** Host+path only for logs — strips query (tokens) and user-info. */
+    static String safeUrlForLog(String url) {
+        if (url == null || url.isEmpty()) return "";
+        try {
+            HttpUrl parsed = HttpUrl.parse(url);
+            if (parsed != null) {
+                return parsed.newBuilder().username("").password("").query(null).fragment(null).build().toString();
+            }
+        } catch (Exception ignored) {
+        }
+        int q = url.indexOf('?');
+        return q >= 0 ? url.substring(0, q) : url;
+    }
+
     private static Request.Builder plexRequest(String url, String token) {
+        // Dual auth: header (Plex preferred) + query (matches playback/image URLs; proxy-safe).
+        String urlForRequest = urlWithQueryToken(url, token);
         Request.Builder b = new Request.Builder()
-                .url(url)
+                .url(urlForRequest)
                 .addHeader("Accept", "application/json")
                 .addHeader("X-Plex-Client-Identifier", deviceId)
                 .addHeader("X-Plex-Product", clientName)
@@ -781,24 +865,50 @@ public class PlexApi {
     }
 
     private static void getJson(String url, String token, SimpleCallback callback) {
+        final String logUrl = safeUrlForLog(url);
         Request request = plexRequest(url, token).get().build();
         getClient().newCall(request).enqueue(new okhttp3.Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                Log.e(TAG, "GET failed: " + url, e);
+                Log.e(TAG, "GET failed: " + logUrl + " " + e.getClass().getSimpleName());
                 getMainHandler().post(() -> callback.onError("Network error: " + e.getMessage()));
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 try {
+                    String contentType = response.header("Content-Type");
+                    if (contentType == null || contentType.isEmpty()) {
+                        if (response.body() != null && response.body().contentType() != null) {
+                            contentType = response.body().contentType().toString();
+                        } else {
+                            contentType = "";
+                        }
+                    }
                     String body = response.body() != null ? response.body().string() : "";
+                    int code = response.code();
+                    int len = body != null ? body.length() : 0;
+                    String kind = classifyBodyKind(body);
+                    // Safe diagnostics: never log tokens or body contents.
+                    Log.i(TAG, "GET " + logUrl
+                            + " status=" + code
+                            + " contentType=" + contentType
+                            + " len=" + len
+                            + " bodyKind=" + kind
+                            + " redirects=" + (response.priorResponse() != null));
                     if (!response.isSuccessful()) {
-                        final String msg = "HTTP error " + response.code();
+                        final String msg = "HTTP error " + code;
                         getMainHandler().post(() -> callback.onError(msg));
                         return;
                     }
-                    getMainHandler().post(() -> callback.onSuccess(body));
+                    if ("html".equals(kind)) {
+                        Log.w(TAG, "GET " + logUrl + " returned HTML (not Plex API JSON/XML)");
+                        getMainHandler().post(() -> callback.onError(
+                                "Plex returned HTML (check Server URL; use http://host:32400, not /web)"));
+                        return;
+                    }
+                    final String okBody = body;
+                    getMainHandler().post(() -> callback.onSuccess(okBody));
                 } finally {
                     response.close();
                 }
@@ -1319,10 +1429,15 @@ public class PlexApi {
         List<ScreensaverItem> out = new ArrayList<>();
         if (body == null || body.isEmpty()) return out;
         try {
-            if (looksLikeXml(body)) {
-                return parseScreensaverItemsXml(body);
+            String kind = classifyBodyKind(body);
+            if ("html".equals(kind) || "empty".equals(kind) || "other".equals(kind)) {
+                Log.w(TAG, "parseScreensaverItems skip bodyKind=" + kind);
+                return out;
             }
-            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            if ("xml".equals(kind)) {
+                return parseScreensaverItemsXml(stripBom(body));
+            }
+            JsonObject root = JsonParser.parseString(stripBom(body)).getAsJsonObject();
             JsonObject mc = root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()
                     ? root.getAsJsonObject("MediaContainer") : root;
             JsonArray metadata = memberAsArray(mc, "Metadata");
@@ -1415,10 +1530,12 @@ public class PlexApi {
             return;
         }
         String base = baseUrl(serverUrl);
+        Log.i(TAG, "listScreensaverCandidates GET " + safeUrlForLog(base + "/library/sections"));
         getJson(base + "/library/sections", token, new SimpleCallback() {
             @Override
             public void onSuccess(String body) {
                 List<String> sectionUrls = new ArrayList<>();
+                String kind = classifyBodyKind(body);
                 try {
                     List<LibrarySection> sections = parseLibrarySections(body);
                     for (LibrarySection section : sections) {
@@ -1434,11 +1551,21 @@ public class PlexApi {
                     }
                 } catch (Exception e) {
                     // Avoid leaking response snippets (Gson may include them) or tokens.
-                    Log.w(TAG, "listScreensaverCandidates sections: " + e.getClass().getSimpleName());
-                    callback.onError("Failed to parse library sections");
+                    Log.w(TAG, "listScreensaverCandidates sections: "
+                            + e.getClass().getSimpleName()
+                            + " bodyKind=" + kind
+                            + " msg=" + (e.getMessage() != null ? e.getMessage() : ""));
+                    if ("html".equals(kind)
+                            || (e.getMessage() != null && e.getMessage().contains("HTML"))) {
+                        callback.onError(
+                                "Plex returned HTML (check Server URL; use http://host:32400, not /web)");
+                    } else {
+                        callback.onError("Failed to parse library sections");
+                    }
                     return;
                 }
                 if (sectionUrls.isEmpty()) {
+                    Log.w(TAG, "listScreensaverCandidates: no movie/show sections bodyKind=" + kind);
                     callback.onError("No movie/show libraries found");
                     return;
                 }

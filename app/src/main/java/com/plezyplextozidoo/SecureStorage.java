@@ -22,6 +22,11 @@ public class SecureStorage {
     private static final String PREFS_FILE = "plex_secure_prefs";
     private static final String FALLBACK_PREFS_FILE = "plex_secure_prefs_fallback";
 
+    /** Preference key suffixes used for path-substitution SMB password slots. */
+    static final String[] SMB_PASSWORD_SUFFIXES = {
+            "", "_02", "_03", "_04", "_05", "_06", "_07", "_08", "_09", "_10"
+    };
+
     private static volatile SharedPreferences instance;
 
     private SecureStorage() {
@@ -49,8 +54,71 @@ public class SecureStorage {
         return deviceId;
     }
 
+    /** Secure-storage key for an SMB password preference suffix ("" or "_02", …). */
+    static String smbSecureKey(String suffix) {
+        String s = suffix == null ? "" : suffix;
+        return "smb_password" + s;
+    }
+
+    /** Default SharedPreferences key for the same SMB password slot. */
+    static String smbPlaintextKey(String suffix) {
+        String s = suffix == null ? "" : suffix;
+        return "smbPassword" + s;
+    }
+
     /**
-     * Removes any plaintext token left in the default SharedPreferences by older builds.
+     * Dual-read SMB password: encrypted store first, then legacy plaintext prefs.
+     * When a plaintext value is found and secure is empty, copies into secure storage.
+     * Does <b>not</b> delete the plaintext original (deferred until migration is verified).
+     */
+    public static String getSmbPassword(Context context, String suffix) {
+        Context app = context.getApplicationContext();
+        SharedPreferences secure = getInstance(app);
+        String secureKey = smbSecureKey(suffix);
+        String secureValue = secure.getString(secureKey, "");
+        if (secureValue != null && !secureValue.isEmpty()) {
+            return secureValue;
+        }
+
+        SharedPreferences defaultPrefs = PreferenceManager.getDefaultSharedPreferences(app);
+        String plain = defaultPrefs.getString(smbPlaintextKey(suffix), "");
+        if (plain != null && !plain.isEmpty()) {
+            // Copy forward only — keep plaintext until migration is verified on device.
+            secure.edit().putString(secureKey, plain).apply();
+            Log.i(TAG, "Migrated SMB password slot to encrypted storage (plaintext retained)");
+            return plain;
+        }
+        return "";
+    }
+
+    /**
+     * Writes an SMB password to encrypted storage. Does not remove any legacy plaintext
+     * copy (destructive cleanup is deferred until migration is verified).
+     */
+    public static void putSmbPassword(Context context, String suffix, String value) {
+        Context app = context.getApplicationContext();
+        String v = value != null ? value : "";
+        getInstance(app).edit().putString(smbSecureKey(suffix), v).apply();
+    }
+
+    /**
+     * Copies any plaintext SMB passwords into encrypted storage without deleting originals.
+     * Safe to call on every Settings / Play start.
+     */
+    public static void migrateSmbPasswords(Context context) {
+        try {
+            for (String suffix : SMB_PASSWORD_SUFFIXES) {
+                getSmbPassword(context, suffix);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "SMB password migration skipped: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Removes any plaintext plex/jellyfin token left in the default SharedPreferences
+     * by older builds. Does <b>not</b> remove SMB plaintext keys (those stay until
+     * migration is verified — see {@link #migrateSmbPasswords}).
      */
     public static void removeLegacyPlaintextPassword(Context context) {
         try {

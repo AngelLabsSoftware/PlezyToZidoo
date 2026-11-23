@@ -56,6 +56,7 @@ public class SettingsActivity extends AppCompatActivity
         super.onCreate(savedInstanceState);
 
         SecureStorage.removeLegacyPlaintextPassword(getApplicationContext());
+        SecureStorage.migrateSmbPasswords(getApplicationContext());
 
         String deviceId = SecureStorage.getDeviceId(getApplicationContext());
         PlexApi.setClientIdentity(Build.MODEL, deviceId, BuildConfig.VERSION_NAME);
@@ -284,14 +285,31 @@ public class SettingsActivity extends AppCompatActivity
 
     public void setSmbPasswordPreference()
     {
-        String[] pref_index = {"", "_02", "_03", "_04", "_05", "_06", "_07", "_08", "_09", "_10"};
-        for (String s: pref_index)
+        Context context = settingsFragment.requireContext();
+        for (String s : SecureStorage.SMB_PASSWORD_SUFFIXES)
         {
             EditTextPreference smbPasswordPreference = settingsFragment.findPreference("smbPassword" + s);
-            if (smbPasswordPreference != null)
+            if (smbPasswordPreference == null)
             {
-                smbPasswordPreference.setOnBindEditTextListener(editText -> editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD));
+                continue;
             }
+
+            // Non-persistent: value lives in SecureStorage (with plaintext dual-read fallback).
+            String existing = SecureStorage.getSmbPassword(context, s);
+            smbPasswordPreference.setSummary(
+                    (existing != null && !existing.isEmpty()) ? "********" : "Not set");
+
+            smbPasswordPreference.setOnBindEditTextListener(editText ->
+                    editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD));
+
+            final String suffix = s;
+            smbPasswordPreference.setOnPreferenceChangeListener((preference, newValue) ->
+            {
+                String value = (newValue != null) ? newValue.toString() : "";
+                SecureStorage.putSmbPassword(context, suffix, value);
+                smbPasswordPreference.setSummary(value.isEmpty() ? "Not set" : "********");
+                return false;
+            });
         }
     }
 
@@ -377,7 +395,8 @@ public class SettingsActivity extends AppCompatActivity
 
     public void setPreferenceOnImport(Map.Entry<String, ?> entry)
     {
-        if(entry.getKey().equals("plex_token") || entry.getKey().equals("plex_access_token"))
+        String key = entry.getKey();
+        if("plex_token".equals(key) || "plex_access_token".equals(key))
         {
             String value = (entry.getValue() != null) ? entry.getValue().toString().trim() : "";
             SecureStorage.getInstance(getApplicationContext()).edit().putString("plex_access_token", value).apply();
@@ -389,7 +408,20 @@ public class SettingsActivity extends AppCompatActivity
             return;
         }
 
-        Preference pref = settingsFragment.findPreference(entry.getKey());
+        if(key != null && key.startsWith("smbPassword"))
+        {
+            String suffix = key.substring("smbPassword".length());
+            String value = (entry.getValue() != null) ? entry.getValue().toString() : "";
+            SecureStorage.putSmbPassword(getApplicationContext(), suffix, value);
+            EditTextPreference smbPref = settingsFragment.findPreference(key);
+            if(smbPref != null)
+            {
+                smbPref.setSummary(value.isEmpty() ? "Not set" : "********");
+            }
+            return;
+        }
+
+        Preference pref = settingsFragment.findPreference(key);
         if(pref instanceof EditTextPreference)
         {
             if(entry.getValue().toString().isEmpty())
@@ -474,6 +506,14 @@ public class SettingsActivity extends AppCompatActivity
                 if(plexToken != null && !plexToken.isEmpty())
                 {
                     prefsMap.put("plex_token", plexToken);
+                }
+                for (String suffix : SecureStorage.SMB_PASSWORD_SUFFIXES)
+                {
+                    String smb = SecureStorage.getSmbPassword(getApplicationContext(), suffix);
+                    if (smb != null && !smb.isEmpty())
+                    {
+                        prefsMap.put(SecureStorage.smbPlaintextKey(suffix), smb);
+                    }
                 }
             }
 

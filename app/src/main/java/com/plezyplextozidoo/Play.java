@@ -133,6 +133,7 @@ public class Play extends AppCompatActivity
         useNewZdiooPlayer = useNewZdiooPlayer();
 
         SecureStorage.removeLegacyPlaintextPassword(getApplicationContext());
+        SecureStorage.migrateSmbPasswords(getApplicationContext());
 
         String deviceId = SecureStorage.getDeviceId(getApplicationContext());
         PlexApi.setClientIdentity(Build.MODEL, deviceId, BuildConfig.VERSION_NAME);
@@ -500,7 +501,8 @@ public class Play extends AppCompatActivity
             String[] path_to_replace_array = PreferenceManager.getDefaultSharedPreferences(getApplicationContext()).getString("path_to_replace" + s, "").split("\\s*,\\s*");
             String[] replaced_with_array = PreferenceManager.getDefaultSharedPreferences(getApplicationContext()).getString("replaced_with" + s, "").split("\\s*,\\s*");
             String smb_username = PreferenceManager.getDefaultSharedPreferences(getApplicationContext()).getString("smbUsername" + s, "");
-            String smb_password = PreferenceManager.getDefaultSharedPreferences(getApplicationContext()).getString("smbPassword" + s, "");
+            // Dual-read encrypted SMB password (migrates plaintext → secure; keeps plaintext until verified)
+            String smb_password = SecureStorage.getSmbPassword(getApplicationContext(), s);
             if (smb_username == null) smb_username = "";
             if (smb_password == null) smb_password = "";
 

@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exclude credential stores from Auto Backup / cloud backup. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="plex_secure_prefs.xml" />
+    <exclude domain="sharedpref" path="plex_secure_prefs_fallback.xml" />
+    <!-- Default preference file name is package-derived; exclude whole sharedpref domain
+         keys that hold SMB passwords via the app-level allowBackup + this file's excludes.
+         Package default prefs still back up non-secret settings; SMB plaintext keys are
+         retained temporarily for migration — exclude the default prefs file entirely to
+         avoid shipping those leftovers via backup. -->
+    <exclude domain="sharedpref" path="com.plezyplextozidoo_preferences.xml" />
+</full-backup-content>

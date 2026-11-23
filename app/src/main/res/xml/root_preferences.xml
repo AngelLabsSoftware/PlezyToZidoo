@@ -127,6 +127,7 @@
         <EditTextPreference
             android:defaultValue=""
             android:key="smbPassword"
+            android:persistent="false"
             android:title="@string/smbPassword_title"
             app:useSimpleSummaryProvider="false"
             android:singleLine="true"
@@ -160,6 +161,7 @@
         <EditTextPreference
             android:defaultValue=""
             android:key="smbPassword_02"
+            android:persistent="false"
             android:title="@string/smbPassword_title"
             app:useSimpleSummaryProvider="false"
             android:singleLine="true"

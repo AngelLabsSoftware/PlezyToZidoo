@@ -9,7 +9,14 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
 import java.io.IOException;
+import java.io.StringReader;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +29,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 
 import okhttp3.Call;
 import okhttp3.HttpUrl;
@@ -164,6 +174,17 @@ public class PlexApi {
 
         public boolean hasTransparentLogo() {
             return logoPath != null && !logoPath.isEmpty();
+        }
+    }
+
+    /** One library section from {@code /library/sections} (JSON or XML). */
+    public static class LibrarySection {
+        public final String key;
+        public final String type;
+
+        public LibrarySection(String key, String type) {
+            this.key = key != null ? key : "";
+            this.type = type != null ? type : "";
         }
     }
 
@@ -564,14 +585,112 @@ public class PlexApi {
     private static JsonArray getMetadataArray(JsonObject root) {
         if (root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()) {
             JsonObject mc = root.getAsJsonObject("MediaContainer");
-            if (mc.has("Metadata") && mc.get("Metadata").isJsonArray()) {
-                return mc.getAsJsonArray("Metadata");
+            JsonArray arr = memberAsArray(mc, "Metadata");
+            if (arr.size() > 0) return arr;
+        }
+        JsonArray top = memberAsArray(root, "Metadata");
+        return top.size() > 0 ? top : null;
+    }
+
+    /**
+     * Plex JSON often emits a bare object when a collection has exactly one entry.
+     * Never returns null.
+     */
+    static JsonArray memberAsArray(JsonObject parent, String name) {
+        if (parent == null || name == null || !parent.has(name) || parent.get(name).isJsonNull()) {
+            return new JsonArray();
+        }
+        JsonElement el = parent.get(name);
+        if (el.isJsonArray()) {
+            return el.getAsJsonArray();
+        }
+        if (el.isJsonObject()) {
+            JsonArray arr = new JsonArray();
+            arr.add(el);
+            return arr;
+        }
+        return new JsonArray();
+    }
+
+    /** True when the body looks like XML (PMS default when Accept: json is ignored). */
+    static boolean looksLikeXml(String body) {
+        if (body == null) return false;
+        for (int i = 0; i < body.length(); i++) {
+            char c = body.charAt(i);
+            if (!Character.isWhitespace(c)) {
+                return c == '<';
             }
         }
-        if (root.has("Metadata") && root.get("Metadata").isJsonArray()) {
-            return root.getAsJsonArray("Metadata");
+        return false;
+    }
+
+    private static Document parseXmlDocument(String body) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(false);
+        try {
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setExpandEntityReferences(false);
+        } catch (Exception ignored) {
+            // Some Android DocumentBuilderFactory implementations omit these features.
         }
-        return null;
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        return builder.parse(new InputSource(new StringReader(body)));
+    }
+
+    /**
+     * Parses {@code /library/sections} as JSON or XML.
+     * Does not log the body (may contain library titles); never logs tokens.
+     */
+    static List<LibrarySection> parseLibrarySections(String body) {
+        List<LibrarySection> out = new ArrayList<>();
+        if (body == null || body.trim().isEmpty()) {
+            return out;
+        }
+        if (looksLikeXml(body)) {
+            return parseLibrarySectionsXml(body);
+        }
+        return parseLibrarySectionsJson(body);
+    }
+
+    private static List<LibrarySection> parseLibrarySectionsJson(String body) {
+        List<LibrarySection> out = new ArrayList<>();
+        JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+        JsonObject mc = root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()
+                ? root.getAsJsonObject("MediaContainer") : root;
+        JsonArray dirs = memberAsArray(mc, "Directory");
+        for (int i = 0; i < dirs.size(); i++) {
+            JsonElement el = dirs.get(i);
+            if (el == null || !el.isJsonObject()) continue;
+            JsonObject dir = el.getAsJsonObject();
+            String key = optString(dir, "key");
+            if (key.isEmpty()) continue;
+            out.add(new LibrarySection(key, optString(dir, "type")));
+        }
+        return out;
+    }
+
+    private static List<LibrarySection> parseLibrarySectionsXml(String body) {
+        List<LibrarySection> out = new ArrayList<>();
+        try {
+            Document doc = parseXmlDocument(body);
+            NodeList dirs = doc.getElementsByTagName("Directory");
+            for (int i = 0; i < dirs.getLength(); i++) {
+                Node n = dirs.item(i);
+                if (n.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element el = (Element) n;
+                // Only top-level section directories (skip nested Location etc. without type/key).
+                String key = el.getAttribute("key");
+                if (key == null || key.isEmpty()) continue;
+                String type = el.getAttribute("type");
+                out.add(new LibrarySection(key, type != null ? type : ""));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "parseLibrarySectionsXml: " + e.getClass().getSimpleName());
+            throw new IllegalArgumentException("Invalid Plex XML sections response");
+        }
+        return out;
     }
 
     // --- Path helpers (shared with Zidoo binge path) ---
@@ -743,36 +862,26 @@ public class PlexApi {
             @Override
             public void onSuccess(String body) {
                 try {
-                    JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-                    JsonArray dirs = null;
-                    if (root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()) {
-                        JsonObject mc = root.getAsJsonObject("MediaContainer");
-                        if (mc.has("Directory") && mc.get("Directory").isJsonArray()) {
-                            dirs = mc.getAsJsonArray("Directory");
-                        }
-                    }
-                    if (dirs == null || dirs.size() == 0) {
+                    List<LibrarySection> sections = parseLibrarySections(body);
+                    if (sections.isEmpty()) {
                         callback.onError("partId " + partId + " not found in library");
                         return;
                     }
                     java.util.ArrayList<String> sectionUrls = new java.util.ArrayList<>();
-                    for (int i = 0; i < dirs.size(); i++) {
-                        JsonElement el = dirs.get(i);
-                        if (el == null || !el.isJsonObject()) continue;
-                        JsonObject dir = el.getAsJsonObject();
-                        String key = optString(dir, "key");
-                        String type = optString(dir, "type");
+                    for (LibrarySection section : sections) {
+                        String key = section.key;
                         if (key.isEmpty()) continue;
                         // type=1 movies, type=4 episodes
-                        if ("movie".equalsIgnoreCase(type)) {
+                        if ("movie".equalsIgnoreCase(section.type)) {
                             sectionUrls.add(base + "/library/sections/" + key + "/all?type=1");
-                        } else if ("show".equalsIgnoreCase(type)) {
+                        } else if ("show".equalsIgnoreCase(section.type)) {
                             sectionUrls.add(base + "/library/sections/" + key + "/all?type=4");
                         }
                     }
                     searchSectionsSequentially(base, token, partId, sectionUrls, 0, callback);
                 } catch (Exception e) {
-                    callback.onError("Failed to parse sections: " + e.getMessage());
+                    Log.w(TAG, "resolveViaSections parse: " + e.getClass().getSimpleName());
+                    callback.onError("Failed to parse sections");
                 }
             }
 
@@ -1044,33 +1153,21 @@ public class PlexApi {
             @Override
             public void onSuccess(String body) {
                 try {
-                    JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-                    JsonArray dirs = null;
-                    if (root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()) {
-                        JsonObject mc = root.getAsJsonObject("MediaContainer");
-                        if (mc.has("Directory") && mc.get("Directory").isJsonArray()) {
-                            dirs = mc.getAsJsonArray("Directory");
-                        }
-                    }
+                    List<LibrarySection> sections = parseLibrarySections(body);
                     java.util.ArrayList<String> urls = new java.util.ArrayList<>();
-                    if (dirs != null) {
-                        for (int i = 0; i < dirs.size(); i++) {
-                            JsonElement el = dirs.get(i);
-                            if (el == null || !el.isJsonObject()) continue;
-                            JsonObject dir = el.getAsJsonObject();
-                            String key = optString(dir, "key");
-                            String type = optString(dir, "type");
-                            if (key.isEmpty()) continue;
-                            if ("movie".equalsIgnoreCase(type)) {
-                                urls.add(base + "/library/sections/" + key + "/all?type=1");
-                            } else if ("show".equalsIgnoreCase(type)) {
-                                urls.add(base + "/library/sections/" + key + "/all?type=4");
-                            }
+                    for (LibrarySection section : sections) {
+                        String key = section.key;
+                        if (key.isEmpty()) continue;
+                        if ("movie".equalsIgnoreCase(section.type)) {
+                            urls.add(base + "/library/sections/" + key + "/all?type=1");
+                        } else if ("show".equalsIgnoreCase(section.type)) {
+                            urls.add(base + "/library/sections/" + key + "/all?type=4");
                         }
                     }
                     searchPathSectionsSequentially(token, serverPath, urls, 0, callback);
                 } catch (Exception e) {
-                    callback.onNotFound("Parse error: " + e.getMessage());
+                    Log.w(TAG, "searchPathViaSections parse: " + e.getClass().getSimpleName());
+                    callback.onNotFound("Failed to parse sections");
                 }
             }
 
@@ -1199,10 +1296,8 @@ public class PlexApi {
      * Extracts a clearLogo path from a Metadata object Image array, or empty.
      */
     static String extractClearLogoPath(JsonObject meta) {
-        if (meta == null || !meta.has("Image") || !meta.get("Image").isJsonArray()) {
-            return "";
-        }
-        JsonArray images = meta.getAsJsonArray("Image");
+        if (meta == null) return "";
+        JsonArray images = memberAsArray(meta, "Image");
         for (int i = 0; i < images.size(); i++) {
             JsonElement el = images.get(i);
             if (el == null || !el.isJsonObject()) continue;
@@ -1217,16 +1312,20 @@ public class PlexApi {
 
     /**
      * Parses movie/show Metadata entries that have background art into screensaver items.
+     * Accepts JSON or XML (PMS may ignore Accept: application/json).
      * Logo is optional (transparent clearLogo only — callers must not invent text logos).
      */
-    static List<ScreensaverItem> parseScreensaverItems(String jsonBody) {
+    static List<ScreensaverItem> parseScreensaverItems(String body) {
         List<ScreensaverItem> out = new ArrayList<>();
-        if (jsonBody == null || jsonBody.isEmpty()) return out;
+        if (body == null || body.isEmpty()) return out;
         try {
-            JsonObject root = JsonParser.parseString(jsonBody).getAsJsonObject();
-            JsonObject mc = root.has("MediaContainer") ? root.getAsJsonObject("MediaContainer") : root;
-            if (!mc.has("Metadata") || !mc.get("Metadata").isJsonArray()) return out;
-            JsonArray metadata = mc.getAsJsonArray("Metadata");
+            if (looksLikeXml(body)) {
+                return parseScreensaverItemsXml(body);
+            }
+            JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+            JsonObject mc = root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()
+                    ? root.getAsJsonObject("MediaContainer") : root;
+            JsonArray metadata = memberAsArray(mc, "Metadata");
             for (int i = 0; i < metadata.size(); i++) {
                 JsonElement el = metadata.get(i);
                 if (el == null || !el.isJsonObject()) continue;
@@ -1247,9 +1346,61 @@ public class PlexApi {
                 out.add(new ScreensaverItem(ratingKey, title, art, logo, date, type));
             }
         } catch (Exception e) {
-            Log.w(TAG, "parseScreensaverItems: " + e.getMessage());
+            // Do not log body (may be large); never log tokens.
+            Log.w(TAG, "parseScreensaverItems: " + e.getClass().getSimpleName());
         }
         return out;
+    }
+
+    private static List<ScreensaverItem> parseScreensaverItemsXml(String body) throws Exception {
+        List<ScreensaverItem> out = new ArrayList<>();
+        Document doc = parseXmlDocument(body);
+        // JSON Metadata maps to Video (movies) or Directory (shows) in PMS XML.
+        collectScreensaverXmlElements(doc.getElementsByTagName("Video"), out);
+        collectScreensaverXmlElements(doc.getElementsByTagName("Directory"), out);
+        collectScreensaverXmlElements(doc.getElementsByTagName("Metadata"), out);
+        return out;
+    }
+
+    private static void collectScreensaverXmlElements(NodeList nodes, List<ScreensaverItem> out) {
+        if (nodes == null) return;
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Node n = nodes.item(i);
+            if (n.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element el = (Element) n;
+            String type = el.getAttribute("type");
+            if (type == null || type.isEmpty()) {
+                if ("Video".equals(el.getTagName())) type = "movie";
+            }
+            if (!"movie".equalsIgnoreCase(type) && !"show".equalsIgnoreCase(type)) continue;
+            String art = el.getAttribute("art");
+            if (art == null || art.isEmpty()) continue;
+            String ratingKey = el.getAttribute("ratingKey");
+            if (ratingKey == null || ratingKey.isEmpty()) continue;
+            String title = el.getAttribute("title");
+            if (title == null) title = "";
+            String date = el.getAttribute("originallyAvailableAt");
+            if (date == null || date.isEmpty()) {
+                String year = el.getAttribute("year");
+                if (year != null && !year.isEmpty()) date = year;
+                else date = "";
+            }
+            String logo = "";
+            NodeList images = el.getElementsByTagName("Image");
+            for (int j = 0; j < images.getLength(); j++) {
+                Node in = images.item(j);
+                if (in.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element img = (Element) in;
+                if ("clearLogo".equalsIgnoreCase(img.getAttribute("type"))) {
+                    String url = img.getAttribute("url");
+                    if (url != null && !url.isEmpty()) {
+                        logo = url;
+                        break;
+                    }
+                }
+            }
+            out.add(new ScreensaverItem(ratingKey, title, art, logo, date, type));
+        }
     }
 
     /**
@@ -1269,28 +1420,22 @@ public class PlexApi {
             public void onSuccess(String body) {
                 List<String> sectionUrls = new ArrayList<>();
                 try {
-                    JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-                    JsonObject mc = root.has("MediaContainer")
-                            ? root.getAsJsonObject("MediaContainer") : root;
-                    if (mc.has("Directory") && mc.get("Directory").isJsonArray()) {
-                        JsonArray dirs = mc.getAsJsonArray("Directory");
-                        for (int i = 0; i < dirs.size(); i++) {
-                            JsonElement el = dirs.get(i);
-                            if (el == null || !el.isJsonObject()) continue;
-                            JsonObject dir = el.getAsJsonObject();
-                            String type = optString(dir, "type");
-                            // movie libraries type=movie; show libraries type=show
-                            if (!"movie".equalsIgnoreCase(type) && !"show".equalsIgnoreCase(type)) {
-                                continue;
-                            }
-                            String key = optString(dir, "key");
-                            if (key.isEmpty()) continue;
-                            String path = key.startsWith("/") ? key : "/library/sections/" + key;
-                            sectionUrls.add(base + path + "/all");
+                    List<LibrarySection> sections = parseLibrarySections(body);
+                    for (LibrarySection section : sections) {
+                        // movie libraries type=movie; show libraries type=show
+                        if (!"movie".equalsIgnoreCase(section.type)
+                                && !"show".equalsIgnoreCase(section.type)) {
+                            continue;
                         }
+                        String key = section.key;
+                        if (key.isEmpty()) continue;
+                        String path = key.startsWith("/") ? key : "/library/sections/" + key;
+                        sectionUrls.add(base + path + "/all");
                     }
                 } catch (Exception e) {
-                    callback.onError("Failed to parse library sections: " + e.getMessage());
+                    // Avoid leaking response snippets (Gson may include them) or tokens.
+                    Log.w(TAG, "listScreensaverCandidates sections: " + e.getClass().getSimpleName());
+                    callback.onError("Failed to parse library sections");
                     return;
                 }
                 if (sectionUrls.isEmpty()) {

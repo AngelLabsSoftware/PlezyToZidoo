@@ -40,11 +40,19 @@ public final class ScreensaverRenderer {
     private static final long MIN_INTERVAL_MS = 5_000L;
     private static final long CROSSFADE_MS = 900L;
 
-    /** Subtle Ken Burns end scale (~2.5% zoom over each slide). */
-    static final float KEN_BURNS_END_SCALE = 1.025f;
+    /**
+     * Ken Burns end scale: ~5% zoom over each slide (~2× the prior 2.5% rate at the
+     * same interval; still linear/smooth, not snappy).
+     */
+    static final float KEN_BURNS_END_SCALE = 1.05f;
+
+    /** Pref value: reduced logo (~25% of prior layout size). Default. */
+    static final String LOGO_SIZE_SMALL = "small";
+    /** Pref value: clearLogo at native file/pixel size. */
+    static final String LOGO_SIZE_ORIGINAL = "original";
 
     /**
-     * Logo height was 120dp; target ~25% → 30dp. Max width was 720dp → 180dp.
+     * Small logo: height was 120dp; target ~25% → 30dp. Max width was 720dp → 180dp.
      * Also capped as a fraction of the screen; never upscaled past native pixels.
      */
     static final float LOGO_HEIGHT_DP = 30f;
@@ -71,6 +79,8 @@ public final class ScreensaverRenderer {
     private boolean allowLowerRes;
     private boolean showLogo;
     private boolean showDate;
+    /** {@link #LOGO_SIZE_SMALL} or {@link #LOGO_SIZE_ORIGINAL}. */
+    private String logoSize = LOGO_SIZE_SMALL;
     private long intervalMs = DEFAULT_INTERVAL_MS;
 
     private final Runnable advanceRunnable = this::advance;
@@ -145,12 +155,20 @@ public final class ScreensaverRenderer {
         allowLowerRes = prefs.getBoolean("screensaver_allow_lower_res", false);
         showLogo = prefs.getBoolean("screensaver_show_logo", true);
         showDate = prefs.getBoolean("screensaver_show_date", true);
+        logoSize = normalizeLogoSize(prefs.getString("screensaver_logo_size", LOGO_SIZE_SMALL));
         int seconds = 20;
         try {
             seconds = Integer.parseInt(prefs.getString("screensaver_interval_sec", "20"));
         } catch (Exception ignored) {
         }
         intervalMs = Math.max(MIN_INTERVAL_MS, seconds * 1000L);
+    }
+
+    static String normalizeLogoSize(@Nullable String value) {
+        if (LOGO_SIZE_ORIGINAL.equals(value)) {
+            return LOGO_SIZE_ORIGINAL;
+        }
+        return LOGO_SIZE_SMALL;
     }
 
     private void showCurrentThenSchedule() {
@@ -258,7 +276,8 @@ public final class ScreensaverRenderer {
             String logoUrl = PlexApi.buildImageUrl(serverUrl, item.logoPath, token);
             logoView.setVisibility(View.VISIBLE);
             logoView.setAlpha(0f);
-            int[] max = logoMaxPx(root);
+            final String sizeMode = logoSize;
+            int[] max = logoMaxPx(root, sizeMode);
             Glide.with(appContext)
                     .load(logoUrl)
                     .apply(new RequestOptions()
@@ -276,7 +295,8 @@ public final class ScreensaverRenderer {
                         public boolean onResourceReady(Drawable resource, Object model,
                                                        Target<Drawable> target, DataSource dataSource,
                                                        boolean isFirstResource) {
-                            handler.post(() -> applyLogoSize(logoView, resource, max[0], max[1]));
+                            handler.post(() -> applyLogoSize(logoView, resource, max[0], max[1],
+                                    sizeMode));
                             return false;
                         }
                     })
@@ -356,11 +376,39 @@ public final class ScreensaverRenderer {
                 Math.max(1, Math.round(intrinsicH * scale))};
     }
 
-    /** Max logo box in px from density + screen fraction (≤ ~25% of prior 120×720dp). */
-    static int[] logoMaxPx(View root) {
+    /**
+     * Display size for a logo: native pixels when {@link #LOGO_SIZE_ORIGINAL}, otherwise
+     * fitted into the max box. Never upscales past intrinsic size.
+     */
+    static int[] resolveLogoDisplaySize(int intrinsicW, int intrinsicH, int maxW, int maxH,
+                                        @Nullable String sizeMode) {
+        if (intrinsicW <= 0 || intrinsicH <= 0) {
+            return new int[]{0, 0};
+        }
+        if (LOGO_SIZE_ORIGINAL.equals(normalizeLogoSize(sizeMode))) {
+            // Native file/pixel size; only shrink if larger than the available screen box.
+            if (maxW <= 0 || maxH <= 0) {
+                return new int[]{intrinsicW, intrinsicH};
+            }
+            if (intrinsicW <= maxW && intrinsicH <= maxH) {
+                return new int[]{intrinsicW, intrinsicH};
+            }
+            return fittedLogoSize(intrinsicW, intrinsicH, maxW, maxH);
+        }
+        return fittedLogoSize(intrinsicW, intrinsicH, maxW, maxH);
+    }
+
+    /**
+     * Max logo box in px. Small: density + screen-fraction caps (~25% of prior 120×720dp).
+     * Original: full screen bounds (native pixels applied in {@link #resolveLogoDisplaySize}).
+     */
+    static int[] logoMaxPx(View root, @Nullable String sizeMode) {
         DisplayMetrics dm = root.getResources().getDisplayMetrics();
         int screenW = root.getWidth() > 0 ? root.getWidth() : dm.widthPixels;
         int screenH = root.getHeight() > 0 ? root.getHeight() : dm.heightPixels;
+        if (LOGO_SIZE_ORIGINAL.equals(normalizeLogoSize(sizeMode))) {
+            return new int[]{Math.max(1, screenW), Math.max(1, screenH)};
+        }
         int fromDpW = Math.round(TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP, LOGO_MAX_WIDTH_DP, dm));
         int fromDpH = Math.round(TypedValue.applyDimension(
@@ -370,10 +418,16 @@ public final class ScreensaverRenderer {
         return new int[]{Math.max(1, maxW), Math.max(1, maxH)};
     }
 
-    private static void applyLogoSize(ImageView logoView, Drawable resource, int maxW, int maxH) {
+    /** @deprecated Prefer {@link #logoMaxPx(View, String)}; defaults to small. */
+    static int[] logoMaxPx(View root) {
+        return logoMaxPx(root, LOGO_SIZE_SMALL);
+    }
+
+    private static void applyLogoSize(ImageView logoView, Drawable resource, int maxW, int maxH,
+                                      @Nullable String sizeMode) {
         if (logoView == null || resource == null) return;
-        int[] size = fittedLogoSize(resource.getIntrinsicWidth(), resource.getIntrinsicHeight(),
-                maxW, maxH);
+        int[] size = resolveLogoDisplaySize(resource.getIntrinsicWidth(),
+                resource.getIntrinsicHeight(), maxW, maxH, sizeMode);
         if (size[0] <= 0 || size[1] <= 0) return;
         ViewGroup.LayoutParams lp = logoView.getLayoutParams();
         if (lp == null) return;
@@ -417,13 +471,17 @@ public final class ScreensaverRenderer {
                             .preload(w, h);
                     if (showLogo && item.hasTransparentLogo()) {
                         String logoUrl = PlexApi.buildImageUrl(serverUrl, item.logoPath, token);
-                        int[] max = logoMaxPx(root);
-                        Glide.with(appContext)
-                                .load(logoUrl)
-                                .apply(new RequestOptions()
-                                        .override(max[0], max[1])
-                                        .diskCacheStrategy(DiskCacheStrategy.NONE))
-                                .preload(max[0], max[1]);
+                        int[] max = logoMaxPx(root, logoSize);
+                        RequestOptions logoOpts = new RequestOptions()
+                                .diskCacheStrategy(DiskCacheStrategy.NONE);
+                        if (LOGO_SIZE_SMALL.equals(logoSize)) {
+                            logoOpts = logoOpts.override(max[0], max[1]);
+                            Glide.with(appContext).load(logoUrl).apply(logoOpts)
+                                    .preload(max[0], max[1]);
+                        } else {
+                            // Original: preload at native size (no forced downscale override).
+                            Glide.with(appContext).load(logoUrl).apply(logoOpts).preload();
+                        }
                     }
                 });
             }

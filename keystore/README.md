@@ -40,9 +40,21 @@ Repo secrets (names only — never commit values):
 | `PP2Z_KEY_ALIAS` | Key alias (`pp2z`) |
 | `PP2Z_KEY_PASSWORD` | Key password |
 
-`.github/workflows/release.yml` decodes the base64 keystore into
-`$RUNNER_TEMP/release.jks` and sets `PP2Z_KEYSTORE_PATH` for `assembleRelease`.
-If any secret is missing, CI skips signed publish (tests still run).
+`.github/workflows/build.yml` (PRs / `main`) and `release.yml` (tags) decode
+the base64 keystore into `$RUNNER_TEMP/release.jks` and set `PP2Z_KEYSTORE_PATH`
+for `assembleRelease`. **If any `PP2Z_*` secret is missing, the job fails** —
+there is no debug-keystore fallback for CI release artifacts, and CI **never**
+runs `keytool -genkeypair`.
+
+### APK naming (Actions artifacts and future GitHub Releases)
+
+```text
+PlezyPlexToZidoo-[versionName]-armeabi-v7a-signed.apk
+```
+
+Example: `PlezyPlexToZidoo-2026.11.3-armeabi-v7a-signed.apk`  
+CI also verifies the signer cert SHA-256 matches the durable 11.3 key
+(`73:43:B6:B3:…:74:0A`) before uploading.
 
 ### Upload once (repo admin)
 

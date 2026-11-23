@@ -27,8 +27,25 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
+    - name: Accept Android licenses and install platform/build-tools
+      run: |
+        set -euo pipefail
+        export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+        echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+        SDKMANAGER=""
+        for c in \
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+          "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" \
+          "$(ls -1d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1)"; do
+          if [ -n "$c" ] && [ -x "$c" ]; then SDKMANAGER="$c"; break; fi
+        done
+        if [ -z "$SDKMANAGER" ]; then
+          echo "::error::sdkmanager not found under $ANDROID_HOME"
+          exit 1
+        fi
+        yes | "$SDKMANAGER" --licenses >/tmp/sdk-licenses.txt || true
+        "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0"
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -91,6 +108,7 @@ jobs:
         PP2Z_KEYSTORE_PASSWORD: ${{ secrets.PP2Z_KEYSTORE_PASSWORD }}
         PP2Z_KEY_ALIAS: ${{ secrets.PP2Z_KEY_ALIAS }}
         PP2Z_KEY_PASSWORD: ${{ secrets.PP2Z_KEY_PASSWORD }}
+        PP2Z_REQUIRE_RELEASE_SIGNING: "true"
 
     - name: Rename and verify signed APK + durable cert
       run: |

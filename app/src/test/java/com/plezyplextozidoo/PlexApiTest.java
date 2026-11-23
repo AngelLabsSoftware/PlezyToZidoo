@@ -86,4 +86,42 @@ public class PlexApiTest {
         assertEquals(1500, PlexApi.msToTicks(1500));
         assertEquals(1500, PlexApi.ticksToMs(1500));
     }
+
+    @Test
+    public void meetsGenuine4k_requiresFullUhd() {
+        assertFalse(PlexApi.meetsGenuine4k(1920, 1080));
+        assertFalse(PlexApi.meetsGenuine4k(3840, 1080));
+        assertFalse(PlexApi.meetsGenuine4k(1920, 2160));
+        assertTrue(PlexApi.meetsGenuine4k(3840, 2160));
+        assertTrue(PlexApi.meetsGenuine4k(4096, 2160));
+    }
+
+    @Test
+    public void parseScreensaverItems_moviesShowsWithArtAndClearLogo() {
+        String json = "{\"MediaContainer\":{\"Metadata\":["
+                + "{\"ratingKey\":\"1\",\"type\":\"movie\",\"title\":\"Film\","
+                + "\"art\":\"/library/metadata/1/art/1\",\"originallyAvailableAt\":\"1999-03-31\","
+                + "\"Image\":[{\"type\":\"clearLogo\",\"url\":\"/library/metadata/1/clearLogo\"}]},"
+                + "{\"ratingKey\":\"2\",\"type\":\"show\",\"title\":\"Series\","
+                + "\"art\":\"/library/metadata/2/art/2\",\"year\":2005},"
+                + "{\"ratingKey\":\"3\",\"type\":\"episode\",\"title\":\"Ep\",\"art\":\"/library/metadata/3/art/3\"},"
+                + "{\"ratingKey\":\"4\",\"type\":\"movie\",\"title\":\"NoArt\"}"
+                + "]}}";
+        java.util.List<PlexApi.ScreensaverItem> items = PlexApi.parseScreensaverItems(json);
+        assertEquals(2, items.size());
+        assertEquals("1", items.get(0).ratingKey);
+        assertTrue(items.get(0).hasTransparentLogo());
+        assertEquals("1999-03-31", items.get(0).originallyAvailableAt);
+        assertEquals("2", items.get(1).ratingKey);
+        assertFalse(items.get(1).hasTransparentLogo());
+        assertEquals("2005", items.get(1).originallyAvailableAt);
+    }
+
+    @Test
+    public void formatReleaseLabel_prefersYear() {
+        assertEquals("1999", PlexApi.formatReleaseLabel("1999-03-31"));
+        assertEquals("2005", PlexApi.formatReleaseLabel("2005"));
+        assertEquals("", PlexApi.formatReleaseLabel(""));
+        assertEquals("", PlexApi.formatReleaseLabel(null));
+    }
 }

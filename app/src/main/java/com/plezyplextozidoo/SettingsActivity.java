@@ -143,6 +143,7 @@ public class SettingsActivity extends AppCompatActivity
         setTestConnectionPreference();
         setSkipBehaviorPreference();
         setOverlayPermissionPreference();
+        setScreensaverPreferences();
 
         Preference substitutionLink = settingsFragment.findPreference("substitution_link");
         if (substitutionLink != null)
@@ -281,6 +282,29 @@ public class SettingsActivity extends AppCompatActivity
 
             return true;
         });
+    }
+
+    private void setScreensaverPreferences()
+    {
+        ListPreference interval = settingsFragment.findPreference("screensaver_interval_sec");
+        if (interval != null)
+        {
+            interval.setSummaryProvider(preference ->
+            {
+                CharSequence entry = ((ListPreference) preference).getEntry();
+                return entry != null ? entry : getString(R.string.screensaver_interval_summary);
+            });
+        }
+
+        Preference preview = settingsFragment.findPreference("screensaver_preview");
+        if (preview != null)
+        {
+            preview.setOnPreferenceClickListener(preference ->
+            {
+                startActivity(new Intent(this, ScreensaverPreviewActivity.class));
+                return true;
+            });
+        }
     }
 
     public void setSmbPasswordPreference()

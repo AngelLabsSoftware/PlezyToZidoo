@@ -13,6 +13,9 @@ import java.io.IOException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -134,6 +137,39 @@ public class PlexApi {
         void onFound(String ratingKey);
         void onNotFound(String error);
     }
+
+    public interface ScreensaverCallback {
+        void onReady(List<ScreensaverItem> items);
+        void onError(String error);
+    }
+
+    /** One Plex library item suitable for the artwork screensaver. */
+    public static class ScreensaverItem {
+        public final String ratingKey;
+        public final String title;
+        public final String artPath;
+        public final String logoPath;
+        public final String originallyAvailableAt;
+        public final String type;
+
+        public ScreensaverItem(String ratingKey, String title, String artPath, String logoPath,
+                               String originallyAvailableAt, String type) {
+            this.ratingKey = ratingKey;
+            this.title = title;
+            this.artPath = artPath;
+            this.logoPath = logoPath;
+            this.originallyAvailableAt = originallyAvailableAt;
+            this.type = type;
+        }
+
+        public boolean hasTransparentLogo() {
+            return logoPath != null && !logoPath.isEmpty();
+        }
+    }
+
+    /** Genuine 4K artwork thresholds (never treat upscaled images as 4K). */
+    public static final int GENUINE_4K_MIN_WIDTH = 3840;
+    public static final int GENUINE_4K_MIN_HEIGHT = 2160;
 
     // --- Result types ---
 
@@ -1150,6 +1186,164 @@ public class PlexApi {
             url += (url.contains("?") ? "&" : "?") + "X-Plex-Token=" + token;
         }
         return url;
+    }
+
+    /**
+     * True when decoded pixel dimensions are genuine 4K (or larger). Does not accept upscales.
+     */
+    public static boolean meetsGenuine4k(int width, int height) {
+        return width >= GENUINE_4K_MIN_WIDTH && height >= GENUINE_4K_MIN_HEIGHT;
+    }
+
+    /**
+     * Extracts a clearLogo path from a Metadata object Image array, or empty.
+     */
+    static String extractClearLogoPath(JsonObject meta) {
+        if (meta == null || !meta.has("Image") || !meta.get("Image").isJsonArray()) {
+            return "";
+        }
+        JsonArray images = meta.getAsJsonArray("Image");
+        for (int i = 0; i < images.size(); i++) {
+            JsonElement el = images.get(i);
+            if (el == null || !el.isJsonObject()) continue;
+            JsonObject img = el.getAsJsonObject();
+            if ("clearLogo".equalsIgnoreCase(optString(img, "type"))) {
+                String url = optString(img, "url");
+                if (!url.isEmpty()) return url;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * Parses movie/show Metadata entries that have background art into screensaver items.
+     * Logo is optional (transparent clearLogo only — callers must not invent text logos).
+     */
+    static List<ScreensaverItem> parseScreensaverItems(String jsonBody) {
+        List<ScreensaverItem> out = new ArrayList<>();
+        if (jsonBody == null || jsonBody.isEmpty()) return out;
+        try {
+            JsonObject root = JsonParser.parseString(jsonBody).getAsJsonObject();
+            JsonObject mc = root.has("MediaContainer") ? root.getAsJsonObject("MediaContainer") : root;
+            if (!mc.has("Metadata") || !mc.get("Metadata").isJsonArray()) return out;
+            JsonArray metadata = mc.getAsJsonArray("Metadata");
+            for (int i = 0; i < metadata.size(); i++) {
+                JsonElement el = metadata.get(i);
+                if (el == null || !el.isJsonObject()) continue;
+                JsonObject meta = el.getAsJsonObject();
+                String type = optString(meta, "type");
+                if (!"movie".equalsIgnoreCase(type) && !"show".equalsIgnoreCase(type)) continue;
+                String art = optString(meta, "art");
+                if (art.isEmpty()) continue;
+                String ratingKey = optString(meta, "ratingKey");
+                if (ratingKey.isEmpty()) continue;
+                String title = optString(meta, "title");
+                String date = optString(meta, "originallyAvailableAt");
+                if (date.isEmpty()) {
+                    long year = optLong(meta, "year", 0);
+                    if (year > 0) date = String.valueOf(year);
+                }
+                String logo = extractClearLogoPath(meta);
+                out.add(new ScreensaverItem(ratingKey, title, art, logo, date, type));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "parseScreensaverItems: " + e.getMessage());
+        }
+        return out;
+    }
+
+    /**
+     * Loads screensaver candidates from movie + show library sections (Plex direct).
+     * Callers are responsible for genuine-4K dimension filtering before display.
+     */
+    public static void listScreensaverCandidates(String serverUrl, String token,
+                                                 ScreensaverCallback callback) {
+        if (serverUrl == null || serverUrl.trim().isEmpty()
+                || token == null || token.isEmpty()) {
+            getMainHandler().post(() -> callback.onError("Plex server URL or token missing"));
+            return;
+        }
+        String base = baseUrl(serverUrl);
+        getJson(base + "/library/sections", token, new SimpleCallback() {
+            @Override
+            public void onSuccess(String body) {
+                List<String> sectionUrls = new ArrayList<>();
+                try {
+                    JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+                    JsonObject mc = root.has("MediaContainer")
+                            ? root.getAsJsonObject("MediaContainer") : root;
+                    if (mc.has("Directory") && mc.get("Directory").isJsonArray()) {
+                        JsonArray dirs = mc.getAsJsonArray("Directory");
+                        for (int i = 0; i < dirs.size(); i++) {
+                            JsonElement el = dirs.get(i);
+                            if (el == null || !el.isJsonObject()) continue;
+                            JsonObject dir = el.getAsJsonObject();
+                            String type = optString(dir, "type");
+                            // movie libraries type=movie; show libraries type=show
+                            if (!"movie".equalsIgnoreCase(type) && !"show".equalsIgnoreCase(type)) {
+                                continue;
+                            }
+                            String key = optString(dir, "key");
+                            if (key.isEmpty()) continue;
+                            String path = key.startsWith("/") ? key : "/library/sections/" + key;
+                            sectionUrls.add(base + path + "/all");
+                        }
+                    }
+                } catch (Exception e) {
+                    callback.onError("Failed to parse library sections: " + e.getMessage());
+                    return;
+                }
+                if (sectionUrls.isEmpty()) {
+                    callback.onError("No movie/show libraries found");
+                    return;
+                }
+                fetchScreensaverSections(token, sectionUrls, 0, new ArrayList<>(), callback);
+            }
+
+            @Override
+            public void onError(String error) {
+                callback.onError(error);
+            }
+        });
+    }
+
+    private static void fetchScreensaverSections(String token, List<String> urls, int index,
+                                                 List<ScreensaverItem> acc,
+                                                 ScreensaverCallback callback) {
+        if (index >= urls.size()) {
+            Collections.shuffle(acc);
+            callback.onReady(acc);
+            return;
+        }
+        getJson(urls.get(index), token, new SimpleCallback() {
+            @Override
+            public void onSuccess(String body) {
+                acc.addAll(parseScreensaverItems(body));
+                fetchScreensaverSections(token, urls, index + 1, acc, callback);
+            }
+
+            @Override
+            public void onError(String error) {
+                // Skip failed sections; continue so one bad library doesn't blank the dream.
+                Log.w(TAG, "Screensaver section failed: " + error);
+                fetchScreensaverSections(token, urls, index + 1, acc, callback);
+            }
+        });
+    }
+
+    /** Formats originallyAvailableAt / year for on-screen display; empty if unknown. */
+    public static String formatReleaseLabel(String originallyAvailableAt) {
+        if (originallyAvailableAt == null) return "";
+        String s = originallyAvailableAt.trim();
+        if (s.isEmpty()) return "";
+        // YYYY-MM-DD → prefer year for lean-back; keep full date if not ISO.
+        if (s.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            return s.substring(0, 4);
+        }
+        if (s.matches("\\d{4}")) {
+            return s;
+        }
+        return s;
     }
 
     // --- JSON helpers ---

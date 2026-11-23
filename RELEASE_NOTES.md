@@ -1,5 +1,13 @@
 # Release notes
 
+## 2026.11.6 — Screensaver polish
+
+- Includes 11.4/11.5 screensaver sections HTML/auth fixes (from open PR #8; not force-merged).
+- Subtle continuous Ken Burns zoom (~2.5%) over each slide; smooth through crossfades.
+- ClearLogo ~25% of prior size; screen-relative max; never upscaled past native pixels.
+- Settings warns/offers `:32400` for bare LAN Server URLs — never silently rewrites custom ports or reverse-proxy URLs.
+- Date display, 4K art rules, logo-only policy, transitions, playback/skip unchanged.
+
 ## 2026.11.2 — Token fallback + Skip overlay
 
 - **PLE-7:** When path substitution does not match, fallback playback uses the original Intent.data URI (real `X-Plex-Token`) or injects the resolved token — never a literal `X-Plex-Token=<token>` placeholder. Debug UI redacts tokens as `X-Plex-Token=***`.

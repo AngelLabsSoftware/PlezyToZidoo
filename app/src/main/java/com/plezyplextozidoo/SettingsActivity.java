@@ -17,6 +17,7 @@ import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.preference.EditTextPreference;
 import androidx.preference.ListPreference;
@@ -187,15 +188,36 @@ public class SettingsActivity extends AppCompatActivity
 
         serverUrlPref.setOnPreferenceChangeListener((preference, newValue) ->
         {
-            String value = (newValue != null) ? newValue.toString().trim() : "";
-            while (value.endsWith("/"))
+            String trimmed = (newValue != null) ? newValue.toString().trim() : "";
+            while (trimmed.endsWith("/"))
             {
-                value = value.substring(0, value.length() - 1);
+                trimmed = trimmed.substring(0, trimmed.length() - 1);
             }
-            serverUrlPref.setText(value);
-            serverUrlPref.setSummary(value.isEmpty() ? getString(R.string.plex_server_url_summary) : value);
+            final String value = trimmed;
+            // Offer :32400 for bare LAN hosts only — never silently rewrite ports/proxies.
+            final String suggested = PlexApi.suggestAppendDefaultPlexPort(value);
+            if (suggested != null && !suggested.equals(value))
+            {
+                new AlertDialog.Builder(settingsFragment.requireContext())
+                        .setTitle(R.string.plex_server_url_port_title)
+                        .setMessage(getString(R.string.plex_server_url_port_message, suggested))
+                        .setPositiveButton(R.string.plex_server_url_port_yes,
+                                (d, w) -> applyPlexServerUrl(serverUrlPref, suggested))
+                        .setNegativeButton(R.string.plex_server_url_port_no,
+                                (d, w) -> applyPlexServerUrl(serverUrlPref, value))
+                        .setCancelable(true)
+                        .show();
+                return false;
+            }
+            applyPlexServerUrl(serverUrlPref, value);
             return false;
         });
+    }
+
+    private void applyPlexServerUrl(EditTextPreference serverUrlPref, String value)
+    {
+        serverUrlPref.setText(value);
+        serverUrlPref.setSummary(value.isEmpty() ? getString(R.string.plex_server_url_summary) : value);
     }
 
     private void setSkipBehaviorPreference()

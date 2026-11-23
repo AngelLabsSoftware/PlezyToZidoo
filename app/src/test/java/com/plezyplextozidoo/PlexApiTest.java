@@ -274,4 +274,37 @@ public class PlexApiTest {
         assertEquals("1", arr.get(0).getAsJsonObject().get("key").getAsString());
         assertEquals(0, PlexApi.memberAsArray(root, "Missing").size());
     }
+
+    @Test
+    public void suggestAppendDefaultPlexPort_bareLanOnly() {
+        assertEquals("http://192.168.1.10:32400",
+                PlexApi.suggestAppendDefaultPlexPort("http://192.168.1.10"));
+        assertEquals("http://10.0.0.5:32400",
+                PlexApi.suggestAppendDefaultPlexPort("http://10.0.0.5/"));
+        assertEquals("http://nas.local:32400",
+                PlexApi.suggestAppendDefaultPlexPort("http://nas.local"));
+        assertEquals("http://plexbox:32400",
+                PlexApi.suggestAppendDefaultPlexPort("http://plexbox"));
+        // Already has default port — no rewrite.
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("http://192.168.1.10:32400"));
+        // Custom port — never rewrite.
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("http://192.168.1.10:8080"));
+        // Public / reverse-proxy style — never rewrite.
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("https://plex.example.com"));
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("https://plex.example.com:443"));
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("http://192.168.1.10/plex"));
+        assertNull(PlexApi.suggestAppendDefaultPlexPort(""));
+        assertNull(PlexApi.suggestAppendDefaultPlexPort(null));
+    }
+
+    @Test
+    public void hasExplicitPort_andPrivateIpv4() {
+        assertTrue(PlexApi.hasExplicitPort("http://192.168.1.10:32400", "192.168.1.10"));
+        assertFalse(PlexApi.hasExplicitPort("http://192.168.1.10", "192.168.1.10"));
+        assertTrue(PlexApi.isPrivateIpv4("192.168.0.1"));
+        assertTrue(PlexApi.isPrivateIpv4("172.16.5.1"));
+        assertFalse(PlexApi.isPrivateIpv4("8.8.8.8"));
+        assertFalse(PlexApi.isLanPlexHost("plex.tv"));
+        assertTrue(PlexApi.isLanPlexHost("192.168.1.1"));
+    }
 }

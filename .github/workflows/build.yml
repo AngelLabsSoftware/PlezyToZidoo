@@ -28,8 +28,28 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Set up Android SDK
-      uses: android-actions/setup-android@v3
+    - name: Accept Android licenses and install platform/build-tools
+      run: |
+        set -euo pipefail
+        # Use the runner-preinstalled SDK. Do NOT use android-actions/setup-android
+        # (it tries to install obsolete package "tools" and fails).
+        export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+        echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+        echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+        # Prefer cmdline-tools/latest; fall back to a versioned path if needed.
+        SDKMANAGER=""
+        for c in \
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+          "$ANDROID_HOME/cmdline-tools/16.0/bin/sdkmanager" \
+          "$(ls -1d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | tail -1)"; do
+          if [ -n "$c" ] && [ -x "$c" ]; then SDKMANAGER="$c"; break; fi
+        done
+        if [ -z "$SDKMANAGER" ]; then
+          echo "::error::sdkmanager not found under $ANDROID_HOME"
+          exit 1
+        fi
+        yes | "$SDKMANAGER" --licenses >/tmp/sdk-licenses.txt || true
+        "$SDKMANAGER" "platforms;android-34" "build-tools;34.0.0"
 
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
@@ -51,7 +71,6 @@ jobs:
       run: ./gradlew lintDebug
 
     - name: Require PP2Z signing secrets
-      id: signing
       env:
         PP2Z_KEYSTORE_BASE64: ${{ secrets.PP2Z_KEYSTORE_BASE64 }}
         PP2Z_KEYSTORE_PASSWORD: ${{ secrets.PP2Z_KEYSTORE_PASSWORD }}
@@ -98,9 +117,9 @@ jobs:
         PP2Z_KEYSTORE_PASSWORD: ${{ secrets.PP2Z_KEYSTORE_PASSWORD }}
         PP2Z_KEY_ALIAS: ${{ secrets.PP2Z_KEY_ALIAS }}
         PP2Z_KEY_PASSWORD: ${{ secrets.PP2Z_KEY_PASSWORD }}
+        PP2Z_REQUIRE_RELEASE_SIGNING: "true"
 
     - name: Rename, verify signature and durable cert
-      id: apk
       run: |
         set -euo pipefail
         APK_NAME="${{ steps.ver.outputs.apk_name }}"
@@ -112,6 +131,7 @@ jobs:
           exit 1
         else
           echo "::error::No release APK found under app/build/outputs/apk/release"
+          ls -la app/build/outputs/apk/release || true
           exit 1
         fi
         mv "$SRC" "$APK_NAME"
@@ -135,7 +155,6 @@ jobs:
           echo "::error::Cert mismatch. Expected durable 11.3 cert $EXPECTED_CERT_SHA256, got $CERT"
           exit 1
         fi
-        echo "cert_ok=true" >> "$GITHUB_OUTPUT"
         sha256sum "$APK_NAME" | tee "${APK_NAME}.sha256"
 
     - name: Upload signed APK artifact

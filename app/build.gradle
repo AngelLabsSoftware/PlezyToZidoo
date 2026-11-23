@@ -48,6 +48,10 @@ android {
             enableV1Signing true
             enableV2Signing true
 
+            // Set by CI assembleRelease only — refuses Android debug fallback for release APKs.
+            def requireReleaseSigning =
+                    "true".equalsIgnoreCase(System.getenv("PP2Z_REQUIRE_RELEASE_SIGNING"))
+
             if (ksPath) {
                 storeFile file(ksPath)
                 storePassword System.getenv("PP2Z_KEYSTORE_PASSWORD")
@@ -68,6 +72,11 @@ android {
                     throw new GradleException(
                             "keystore/keystore.properties is missing storePassword or keyPassword. See keystore/README.md")
                 }
+            } else if (requireReleaseSigning) {
+                // CI / release artifacts must use PP2Z_* (or local durable JKS) — never debug.
+                throw new GradleException(
+                        "Release signing required but PP2Z_KEYSTORE_PATH / local keystore missing. "
+                                + "Do not generate a keystore in CI; configure PP2Z_* secrets.")
             } else if (debugKs.exists()) {
                 storeFile debugKs
                 storePassword "android"

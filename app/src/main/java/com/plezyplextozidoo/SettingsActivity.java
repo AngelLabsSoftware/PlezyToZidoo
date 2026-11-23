@@ -318,6 +318,16 @@ public class SettingsActivity extends AppCompatActivity
             });
         }
 
+        ListPreference logoSize = settingsFragment.findPreference("screensaver_logo_size");
+        if (logoSize != null)
+        {
+            logoSize.setSummaryProvider(preference ->
+            {
+                CharSequence entry = ((ListPreference) preference).getEntry();
+                return entry != null ? entry : getString(R.string.screensaver_logo_size_summary);
+            });
+        }
+
         Preference preview = settingsFragment.findPreference("screensaver_preview");
         if (preview != null)
         {

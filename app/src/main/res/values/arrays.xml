@@ -25,4 +25,13 @@
         <item>30</item>
         <item>60</item>
     </string-array>
+
+    <string-array name="screensaver_logo_size_entries">
+        <item>Small</item>
+        <item>Original Size</item>
+    </string-array>
+    <string-array name="screensaver_logo_size_values">
+        <item>small</item>
+        <item>original</item>
+    </string-array>
 </resources>

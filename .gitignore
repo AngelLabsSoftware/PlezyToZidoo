@@ -22,6 +22,16 @@ output.json
 # Keystore files
 *.jks
 *.keystore
+keystore/keystore.properties
+keystore/*.properties
+!keystore/keystore.properties.example
+
+# Local secrets / env
+.env
+.env.*
+*.pem
+*.p12
+*.bks
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json

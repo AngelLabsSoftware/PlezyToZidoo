@@ -148,23 +148,26 @@ Plezy  --VIEW URI-->  PlezyPlexToZidoo  --path sub-->  com.zidoo.player
                               +-- Plex API (markers/timeline) +-- 127.0.0.1:9529 status
 ```
 
-## Planned: Plex artwork screensaver (not in v2026.11.2)
+## Plex artwork screensaver (in code — needs Z9X verification)
 
-A native Android DayDream / `DreamService` screensaver is planned for compatible Zidoo firmware. **This is a proposed feature, not part of the current APK.** The intention is to make it selectable from the Zidoo's **Settings → Display → Screensaver select** menu, subject to device testing.
+A native Android DayDream / `DreamService` (“**Plex Artwork**”) is included in **v2026.11.3** builds. **It has not been verified on a Zidoo yet, and there is no new GitHub Release until that test passes.** Skip Intro/Credits behaviour is unchanged.
 
-Planned behaviour:
+**Enable on Zidoo (intended path):** Advanced / Android Settings → Display → Screensaver → choose **Plex Artwork**. Do **not** use Image Player “set as screensaver” for this. Some Home Theater modes may override Android’s screensaver selection.
 
-- Display cinematic Plex fanart with a **pre-existing transparent film or series logo** overlaid. No logo, no display; no generated or plain-text logo substitutes.
-- Accept only genuinely **4K (3840 × 2160 or better)** background artwork, not lower-resolution images upscaled by Plex.
-- Offer a **Movies / TV Series / Both** selector (Both by default).
-- Offer **Recent titles only**: when enabled, limit titles to those originally released in the last **two years**; when disabled, allow any release year (default).
-- Offer artwork durations of **20 / 30 / 45 / 60 seconds** (45 default), and crossfades of **2 / 3 / 5 seconds** (3 default).
-- Use an exceptionally subtle, slow zoom, gentle transitions, local artwork caching and modest logo movement suitable for an OLED display.
-- Avoid repeating the same titles consecutively, and stop promptly when the screensaver is dismissed or video playback resumes.
+**In-app:** Settings → **Plex Artwork Screensaver** → Preview (same renderer as DayDream; tap to exit). Requires fallback **Plex Server URL** + **X-Plex-Token**.
 
-**Open implementation questions:** verify whether Plex exposes usable original transparent logos and source-resolution artwork for the selected libraries, and confirm the Zidoo firmware supports this app's `DreamService`. Do not assume those capabilities are available until tested. The screensaver must not require Jellyfin.
+| Behaviour | Detail |
+|---|---|
+| Art source | Plex movie + show libraries directly (no Jellyfin / Fanart.tv). |
+| Logos | Transparent Plex `clearLogo` only — never text or generated substitutes. |
+| 4K filter | Default: genuine **3840×2160+** only (measured from the image). Optional **Allow lower-res art** is **off** by default. Never upscales and labels as 4K. |
+| Date | Original release year from `originallyAvailableAt` / `year` when present. |
+| Interval | 10 / 15 / 20 / 30 / 60 seconds (default 20). |
+| Cache | Glide **memory + preload only** — no separate on-disk art library. |
 
-A configurable **3 / 5 / 7 / 10 second** countdown has also been discussed as a possible future enhancement. **It is not implemented**; the current countdown remains fixed at 3 seconds, with **OK/Enter to skip immediately and Back to cancel**.
+**Still optional / future polish (not required for first device test):** library Movies/TV toggle, “recent titles only”, configurable crossfade/zoom, consecutive-title avoidance.
+
+A configurable **3 / 5 / 7 / 10 second** skip countdown remains a possible future enhancement. **It is not implemented**; the skip countdown stays fixed at 3 seconds, with **OK/Enter to skip immediately and Back to cancel**.
 
 ## Build from source
 

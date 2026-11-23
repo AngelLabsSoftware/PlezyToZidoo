@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id 'com.android.application'
 }
@@ -10,8 +12,8 @@ android {
         applicationId "com.plezyplextozidoo"
         minSdkVersion 28
         targetSdkVersion 28
-        versionCode 20261123
-        versionName "2026.11.2"
+        versionCode 20261124
+        versionName "2026.11.3"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
@@ -31,30 +33,50 @@ android {
 
     // Signing priority:
     // 1) CI / release secrets via PP2Z_* env vars
-    // 2) Project-local private sideload keystore (keystore/pp2z-private-release.jks)
+    // 2) Project-local private sideload keystore + gitignored keystore/keystore.properties
     // 3) Android debug keystore (local installs only)
     // The local keystore is a PRIVATE TEST / SIDELOAD key — not for Play Store.
+    // Never hardcode store/key passwords in this file.
     signingConfigs {
         release {
             def ksPath = System.getenv("PP2Z_KEYSTORE_PATH")
             def localKs = rootProject.file("keystore/pp2z-private-release.jks")
+            def localPropsFile = rootProject.file("keystore/keystore.properties")
             def debugKs = file("${System.getProperty('user.home')}/.android/debug.keystore")
 
             // Enable JAR + APK Signature Scheme v2 for sideload friendliness on OEM boxes.
             enableV1Signing true
             enableV2Signing true
 
+            // Set by CI assembleRelease only — refuses Android debug fallback for release APKs.
+            def requireReleaseSigning =
+                    "true".equalsIgnoreCase(System.getenv("PP2Z_REQUIRE_RELEASE_SIGNING"))
+
             if (ksPath) {
                 storeFile file(ksPath)
                 storePassword System.getenv("PP2Z_KEYSTORE_PASSWORD")
                 keyAlias System.getenv("PP2Z_KEY_ALIAS")
                 keyPassword System.getenv("PP2Z_KEY_PASSWORD")
-            } else if (localKs.exists()) {
-                storeFile localKs
-                // Private sideload credentials — see keystore/README.md
-                storePassword "pp2z-private-sideload"
-                keyAlias "pp2z"
-                keyPassword "pp2z-private-sideload"
+            } else if (localKs.exists() && localPropsFile.exists()) {
+                def localProps = new Properties()
+                localPropsFile.withInputStream { localProps.load(it) }
+                def storePass = localProps.getProperty("storePassword")
+                def keyPass = localProps.getProperty("keyPassword")
+                def alias = localProps.getProperty("keyAlias", "pp2z")
+                if (storePass && keyPass) {
+                    storeFile localKs
+                    storePassword storePass
+                    keyAlias alias
+                    keyPassword keyPass
+                } else {
+                    throw new GradleException(
+                            "keystore/keystore.properties is missing storePassword or keyPassword. See keystore/README.md")
+                }
+            } else if (requireReleaseSigning) {
+                // CI / release artifacts must use PP2Z_* (or local durable JKS) — never debug.
+                throw new GradleException(
+                        "Release signing required but PP2Z_KEYSTORE_PATH / local keystore missing. "
+                                + "Do not generate a keystore in CI; configure PP2Z_* secrets.")
             } else if (debugKs.exists()) {
                 storeFile debugKs
                 storePassword "android"

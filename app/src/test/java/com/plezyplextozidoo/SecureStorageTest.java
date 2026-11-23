@@ -33,4 +33,17 @@ public class SecureStorageTest {
             assertTrue(SettingsActivity.isPasswordKey(SecureStorage.smbPlaintextKey(suffix)));
         }
     }
+
+    @Test
+    public void isCredentialKey_detectsTokenAndSmbSecureKeys() {
+        assertTrue(SecureStorage.isCredentialKey("plex_access_token"));
+        assertTrue(SecureStorage.isCredentialKey("plex_token"));
+        assertTrue(SecureStorage.isCredentialKey("smb_password"));
+        assertTrue(SecureStorage.isCredentialKey("smb_password_02"));
+        assertTrue(SecureStorage.isCredentialKey("smbPassword"));
+        assertFalse(SecureStorage.isCredentialKey("device_id"));
+        assertFalse(SecureStorage.isCredentialKey("plex_server_url"));
+        assertFalse(SecureStorage.isCredentialKey(null));
+    }
+
 }

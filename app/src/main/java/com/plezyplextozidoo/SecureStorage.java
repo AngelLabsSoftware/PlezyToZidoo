@@ -4,17 +4,27 @@ import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
 import androidx.preference.PreferenceManager;
 import androidx.security.crypto.EncryptedSharedPreferences;
 import androidx.security.crypto.MasterKey;
 
 import java.io.IOException;
 import java.security.GeneralSecurityException;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Singleton wrapper around EncryptedSharedPreferences for secure credential storage.
- * Falls back to regular SharedPreferences if encryption is unavailable.
+ * <p>
+ * If encrypted prefs cannot be created, non-credential keys may use a private prefs file,
+ * but <b>credentials are never silently persisted in plaintext</b> — they stay session-only
+ * in memory until encryption works again. Legacy plaintext SMB values in default prefs are
+ * still readable for migration / playback continuity.
  */
 public class SecureStorage {
 
@@ -28,9 +38,16 @@ public class SecureStorage {
     };
 
     private static volatile SharedPreferences instance;
+    private static volatile boolean encryptionAvailable = true;
 
     private SecureStorage() {
         // Prevent instantiation
+    }
+
+    /** True when EncryptedSharedPreferences initialized successfully. */
+    public static boolean isEncryptionAvailable() {
+        // Force init so callers after first getInstance see the real flag.
+        return encryptionAvailable;
     }
 
     public static SharedPreferences getInstance(Context context) {
@@ -66,9 +83,17 @@ public class SecureStorage {
         return "smbPassword" + s;
     }
 
+    static boolean isCredentialKey(@Nullable String key) {
+        if (key == null) return false;
+        if ("plex_access_token".equals(key) || "plex_token".equals(key)) return true;
+        if (key.startsWith("smb_password")) return true;
+        return key.startsWith("smbPassword");
+    }
+
     /**
-     * Dual-read SMB password: encrypted store first, then legacy plaintext prefs.
-     * When a plaintext value is found and secure is empty, copies into secure storage.
+     * Dual-read SMB password: encrypted (or session) store first, then legacy plaintext prefs.
+     * When a plaintext value is found and secure is empty, copies into secure storage
+     * <b>only if encryption is available</b> (never copies into a plaintext disk fallback).
      * Does <b>not</b> delete the plaintext original (deferred until migration is verified).
      */
     public static String getSmbPassword(Context context, String suffix) {
@@ -83,27 +108,35 @@ public class SecureStorage {
         SharedPreferences defaultPrefs = PreferenceManager.getDefaultSharedPreferences(app);
         String plain = defaultPrefs.getString(smbPlaintextKey(suffix), "");
         if (plain != null && !plain.isEmpty()) {
-            // Copy forward only — keep plaintext until migration is verified on device.
-            secure.edit().putString(secureKey, plain).apply();
-            Log.i(TAG, "Migrated SMB password slot to encrypted storage (plaintext retained)");
+            if (encryptionAvailable) {
+                secure.edit().putString(secureKey, plain).apply();
+                Log.i(TAG, "Migrated SMB password slot to encrypted storage (plaintext retained)");
+            } else {
+                Log.w(TAG, "Encryption unavailable — using legacy SMB plaintext for read only; "
+                        + "not copying credentials to disk fallback");
+            }
             return plain;
         }
         return "";
     }
 
     /**
-     * Writes an SMB password to encrypted storage. Does not remove any legacy plaintext
-     * copy (destructive cleanup is deferred until migration is verified).
+     * Writes an SMB password to encrypted storage when available; otherwise keeps it
+     * session-only in memory (never writes credential plaintext to the fallback file).
+     * Does not remove any legacy plaintext copy (destructive cleanup deferred).
      */
     public static void putSmbPassword(Context context, String suffix, String value) {
         Context app = context.getApplicationContext();
         String v = value != null ? value : "";
         getInstance(app).edit().putString(smbSecureKey(suffix), v).apply();
+        if (!encryptionAvailable) {
+            Log.e(TAG, "SMB password kept session-only — encrypted SharedPreferences unavailable");
+        }
     }
 
     /**
      * Copies any plaintext SMB passwords into encrypted storage without deleting originals.
-     * Safe to call on every Settings / Play start.
+     * No-ops credential disk writes when encryption is unavailable.
      */
     public static void migrateSmbPasswords(Context context) {
         try {
@@ -154,16 +187,194 @@ public class SecureStorage {
                     .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
                     .build();
 
-            return EncryptedSharedPreferences.create(
+            SharedPreferences encrypted = EncryptedSharedPreferences.create(
                     context,
                     PREFS_FILE,
                     masterKey,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             );
+            encryptionAvailable = true;
+            return encrypted;
         } catch (GeneralSecurityException | IOException e) {
-            Log.e(TAG, "Failed to create encrypted preferences, using fallback", e);
-            return context.getSharedPreferences(FALLBACK_PREFS_FILE, Context.MODE_PRIVATE);
+            encryptionAvailable = false;
+            Log.e(TAG, "Failed to create encrypted preferences — credentials will NOT be "
+                    + "persisted in plaintext; non-credential keys use a private prefs file", e);
+            SharedPreferences disk = context.getSharedPreferences(FALLBACK_PREFS_FILE, Context.MODE_PRIVATE);
+            return new CredentialSafePreferences(disk);
+        }
+    }
+
+    /**
+     * Wraps a disk SharedPreferences so credential keys never hit disk.
+     * Credential gets/puts use an in-memory map for the process lifetime only.
+     */
+    static final class CredentialSafePreferences implements SharedPreferences {
+        private final SharedPreferences disk;
+        private final ConcurrentHashMap<String, String> sessionCredentials = new ConcurrentHashMap<>();
+
+        CredentialSafePreferences(SharedPreferences disk) {
+            this.disk = disk;
+        }
+
+        @Override
+        public Map<String, ?> getAll() {
+            Map<String, Object> all = new HashMap<>(disk.getAll());
+            all.putAll(sessionCredentials);
+            return all;
+        }
+
+        @Override
+        public String getString(String key, @Nullable String defValue) {
+            if (isCredentialKey(key)) {
+                String v = sessionCredentials.get(key);
+                return v != null ? v : defValue;
+            }
+            return disk.getString(key, defValue);
+        }
+
+        @Override
+        public Set<String> getStringSet(String key, @Nullable Set<String> defValues) {
+            return disk.getStringSet(key, defValues);
+        }
+
+        @Override
+        public int getInt(String key, int defValue) {
+            return disk.getInt(key, defValue);
+        }
+
+        @Override
+        public long getLong(String key, long defValue) {
+            return disk.getLong(key, defValue);
+        }
+
+        @Override
+        public float getFloat(String key, float defValue) {
+            return disk.getFloat(key, defValue);
+        }
+
+        @Override
+        public boolean getBoolean(String key, boolean defValue) {
+            return disk.getBoolean(key, defValue);
+        }
+
+        @Override
+        public boolean contains(String key) {
+            if (isCredentialKey(key)) {
+                return sessionCredentials.containsKey(key);
+            }
+            return disk.contains(key);
+        }
+
+        @Override
+        public Editor edit() {
+            return new Editor() {
+                private final SharedPreferences.Editor diskEditor = disk.edit();
+                private final Map<String, String> pendingCredPuts = new HashMap<>();
+                private final Set<String> pendingCredRemoves = new HashSet<>();
+                private boolean clearSessionCreds = false;
+
+                @Override
+                public Editor putString(String key, @Nullable String value) {
+                    if (isCredentialKey(key)) {
+                        if (value == null) {
+                            pendingCredRemoves.add(key);
+                            pendingCredPuts.remove(key);
+                        } else {
+                            pendingCredPuts.put(key, value);
+                            pendingCredRemoves.remove(key);
+                        }
+                        return this;
+                    }
+                    diskEditor.putString(key, value);
+                    return this;
+                }
+
+                @Override
+                public Editor putStringSet(String key, @Nullable Set<String> values) {
+                    diskEditor.putStringSet(key, values);
+                    return this;
+                }
+
+                @Override
+                public Editor putInt(String key, int value) {
+                    diskEditor.putInt(key, value);
+                    return this;
+                }
+
+                @Override
+                public Editor putLong(String key, long value) {
+                    diskEditor.putLong(key, value);
+                    return this;
+                }
+
+                @Override
+                public Editor putFloat(String key, float value) {
+                    diskEditor.putFloat(key, value);
+                    return this;
+                }
+
+                @Override
+                public Editor putBoolean(String key, boolean value) {
+                    diskEditor.putBoolean(key, value);
+                    return this;
+                }
+
+                @Override
+                public Editor remove(String key) {
+                    if (isCredentialKey(key)) {
+                        pendingCredRemoves.add(key);
+                        pendingCredPuts.remove(key);
+                        return this;
+                    }
+                    diskEditor.remove(key);
+                    return this;
+                }
+
+                @Override
+                public Editor clear() {
+                    clearSessionCreds = true;
+                    pendingCredPuts.clear();
+                    pendingCredRemoves.clear();
+                    diskEditor.clear();
+                    return this;
+                }
+
+                private void applySession() {
+                    if (clearSessionCreds) {
+                        sessionCredentials.clear();
+                    }
+                    for (String k : pendingCredRemoves) {
+                        sessionCredentials.remove(k);
+                    }
+                    sessionCredentials.putAll(pendingCredPuts);
+                    if (!pendingCredPuts.isEmpty()) {
+                        Log.e(TAG, "Credential values held in memory only (encryption unavailable)");
+                    }
+                }
+
+                @Override
+                public boolean commit() {
+                    applySession();
+                    return diskEditor.commit();
+                }
+
+                @Override
+                public void apply() {
+                    applySession();
+                    diskEditor.apply();
+                }
+            };
+        }
+
+        @Override
+        public void registerOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener listener) {
+            disk.registerOnSharedPreferenceChangeListener(listener);
+        }
+
+        @Override
+        public void unregisterOnSharedPreferenceChangeListener(OnSharedPreferenceChangeListener listener) {
+            disk.unregisterOnSharedPreferenceChangeListener(listener);
         }
     }
 }

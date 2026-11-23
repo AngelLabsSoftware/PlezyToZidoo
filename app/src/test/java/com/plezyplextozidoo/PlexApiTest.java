@@ -132,6 +132,60 @@ public class PlexApiTest {
         assertFalse(PlexApi.looksLikeXml("{\"MediaContainer\":{}}"));
         assertFalse(PlexApi.looksLikeXml(null));
         assertFalse(PlexApi.looksLikeXml(""));
+        // HTML must not be treated as PMS XML (11.4 still failed on this).
+        assertFalse(PlexApi.looksLikeXml("<!DOCTYPE html><html><body>login</body></html>"));
+        assertFalse(PlexApi.looksLikeXml("<html lang=\"en\"><head></head></html>"));
+        assertTrue(PlexApi.looksLikeHtml("<!DOCTYPE html><html></html>"));
+    }
+
+    @Test
+    public void classifyBodyKind_bomAndHtml() {
+        assertEquals("xml", PlexApi.classifyBodyKind("\uFEFF<?xml version=\"1.0\"?><MediaContainer/>"));
+        assertEquals("json", PlexApi.classifyBodyKind("\uFEFF{\"MediaContainer\":{}}"));
+        assertEquals("html", PlexApi.classifyBodyKind("<!DOCTYPE html><html></html>"));
+        assertEquals("empty", PlexApi.classifyBodyKind("   "));
+    }
+
+    @Test
+    public void parseLibrarySections_htmlThrowsNotDomParse() {
+        try {
+            PlexApi.parseLibrarySections("<!DOCTYPE html><html><body>gate</body></html>");
+            fail("expected IllegalArgumentException for HTML");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("HTML"));
+        }
+    }
+
+    @Test
+    public void parseLibrarySections_xmlWithBom() {
+        String xml = "\uFEFF<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<MediaContainer><Directory key=\"1\" type=\"movie\"/></MediaContainer>";
+        java.util.List<PlexApi.LibrarySection> sections = PlexApi.parseLibrarySections(xml);
+        assertEquals(1, sections.size());
+        assertEquals("1", sections.get(0).key);
+        assertEquals("movie", sections.get(0).type);
+    }
+
+    @Test
+    public void baseUrl_stripsPlexWebPath() {
+        assertEquals("http://192.0.2.10:32400",
+                PlexApi.baseUrl("http://192.0.2.10:32400/web"));
+        assertEquals("http://192.0.2.10:32400",
+                PlexApi.baseUrl("http://192.0.2.10:32400/web/"));
+        assertEquals("http://192.0.2.10:32400",
+                PlexApi.baseUrl("http://192.0.2.10:32400/web/index.html"));
+        assertEquals("http://192.0.2.10:32400",
+                PlexApi.baseUrl("http://192.0.2.10:32400/"));
+    }
+
+    @Test
+    public void urlWithQueryToken_addsOnceAndSafeLogStripsQuery() {
+        String with = PlexApi.urlWithQueryToken("http://host:32400/library/sections", "secret-token");
+        assertTrue(with.contains("X-Plex-Token=secret-token"));
+        assertEquals(with, PlexApi.urlWithQueryToken(with, "secret-token"));
+        String logged = PlexApi.safeUrlForLog(with);
+        assertFalse(logged.contains("secret-token"));
+        assertTrue(logged.contains("/library/sections"));
     }
 
     @Test

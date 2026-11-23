@@ -370,6 +370,111 @@ public class PlexApi {
         return trimmed;
     }
 
+    /** Default Plex Media Server listen port (LAN). */
+    public static final int DEFAULT_PLEX_PORT = 32400;
+
+    /**
+     * When {@code serverUrl} is a bare LAN IP/host with no explicit port, returns the same
+     * URL with {@code :32400} after the host. Returns {@code null} when no suggestion should
+     * be offered (already has a port, non-LAN / reverse-proxy style URL, or unparseable).
+     * Settings must warn and offer — never silently rewrite custom ports or proxy URLs.
+     */
+    public static String suggestAppendDefaultPlexPort(String serverUrl) {
+        if (serverUrl == null) return null;
+        String trimmed = serverUrl.trim();
+        if (trimmed.isEmpty()) return null;
+
+        HttpUrl parsed = HttpUrl.parse(trimmed);
+        boolean addedScheme = false;
+        if (parsed == null) {
+            parsed = HttpUrl.parse("http://" + trimmed);
+            addedScheme = parsed != null;
+        }
+        if (parsed == null) return null;
+
+        String host = parsed.host();
+        if (host == null || host.isEmpty()) return null;
+        if (!isLanPlexHost(host)) return null;
+
+        // Explicit port in the typed URL — never rewrite custom ports.
+        String authoritySource = addedScheme ? trimmed : trimmed;
+        if (hasExplicitPort(authoritySource, host)) return null;
+
+        // Path beyond "/" usually means reverse proxy — never rewrite those.
+        String path = parsed.encodedPath();
+        if (path != null && path.length() > 1) return null;
+
+        HttpUrl suggested = parsed.newBuilder()
+                .port(DEFAULT_PLEX_PORT)
+                .encodedPath("/")
+                .query(null)
+                .fragment(null)
+                .build();
+        String out = suggested.toString();
+        while (out.endsWith("/")) {
+            out = out.substring(0, out.length() - 1);
+        }
+        return out;
+    }
+
+    /** True when the typed URL includes an explicit {@code :port} after the host. */
+    static boolean hasExplicitPort(String rawUrl, String host) {
+        if (rawUrl == null || host == null || host.isEmpty()) return false;
+        String lower = rawUrl.toLowerCase(Locale.ROOT);
+        String hostLower = host.toLowerCase(Locale.ROOT);
+        int hostAt = lower.indexOf('[' + hostLower + ']');
+        int hostLen;
+        if (hostAt >= 0) {
+            hostLen = hostLower.length() + 2; // brackets
+        } else {
+            hostAt = lower.indexOf(hostLower);
+            if (hostAt < 0) return false;
+            hostLen = hostLower.length();
+        }
+        int after = hostAt + hostLen;
+        return after < rawUrl.length() && rawUrl.charAt(after) == ':';
+    }
+
+    /**
+     * LAN-ish hosts where PMS commonly listens on :32400 without a reverse proxy.
+     * Public DNS names are treated as reverse-proxy candidates (no port suggestion).
+     */
+    static boolean isLanPlexHost(String host) {
+        if (host == null || host.isEmpty()) return false;
+        String h = host.toLowerCase(Locale.ROOT);
+        if (h.endsWith(".local") || h.endsWith(".lan") || h.endsWith(".home")) {
+            return true;
+        }
+        if (!h.contains(".") && !h.contains(":")) {
+            return true; // single-label LAN hostname
+        }
+        if (isPrivateIpv4(h)) return true;
+        // IPv6 unique-local / link-local (HttpUrl host is unbracketed).
+        if (h.startsWith("fd") || h.startsWith("fc") || h.startsWith("fe80:")) {
+            return true;
+        }
+        return false;
+    }
+
+    static boolean isPrivateIpv4(String host) {
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) return false;
+        try {
+            int[] oct = new int[4];
+            for (int i = 0; i < 4; i++) {
+                oct[i] = Integer.parseInt(parts[i]);
+                if (oct[i] < 0 || oct[i] > 255) return false;
+            }
+            if (oct[0] == 10) return true;
+            if (oct[0] == 127) return true;
+            if (oct[0] == 192 && oct[1] == 168) return true;
+            if (oct[0] == 172 && oct[1] >= 16 && oct[1] <= 31) return true;
+            return false;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
     /**
      * True when playback has reached the watched / scrobble threshold (≥90%).
      */

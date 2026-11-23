@@ -2,12 +2,15 @@ package com.plezyplextozidoo;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.drawable.Drawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.View;
-import android.view.animation.AlphaAnimation;
-import android.view.animation.Animation;
+import android.view.ViewGroup;
+import android.view.animation.LinearInterpolator;
 import android.widget.ImageView;
 import android.widget.TextView;
 
@@ -15,8 +18,12 @@ import androidx.annotation.Nullable;
 import androidx.preference.PreferenceManager;
 
 import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.DataSource;
 import com.bumptech.glide.load.engine.DiskCacheStrategy;
+import com.bumptech.glide.load.engine.GlideException;
+import com.bumptech.glide.request.RequestListener;
 import com.bumptech.glide.request.RequestOptions;
+import com.bumptech.glide.request.target.Target;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -33,6 +40,18 @@ public final class ScreensaverRenderer {
     private static final long MIN_INTERVAL_MS = 5_000L;
     private static final long CROSSFADE_MS = 900L;
 
+    /** Subtle Ken Burns end scale (~2.5% zoom over each slide). */
+    static final float KEN_BURNS_END_SCALE = 1.025f;
+
+    /**
+     * Logo height was 120dp; target ~25% → 30dp. Max width was 720dp → 180dp.
+     * Also capped as a fraction of the screen; never upscaled past native pixels.
+     */
+    static final float LOGO_HEIGHT_DP = 30f;
+    static final float LOGO_MAX_WIDTH_DP = 180f;
+    static final float LOGO_MAX_SCREEN_WIDTH_FRAC = 0.18f;
+    static final float LOGO_MAX_SCREEN_HEIGHT_FRAC = 0.08f;
+
     private final Context appContext;
     private final View root;
     private final ImageView artView;
@@ -43,6 +62,7 @@ public final class ScreensaverRenderer {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final List<PlexApi.ScreensaverItem> playlist = new ArrayList<>();
+    private final LinearInterpolator kenBurnsInterpolator = new LinearInterpolator();
 
     private String serverUrl = "";
     private String token = "";
@@ -108,6 +128,9 @@ public final class ScreensaverRenderer {
     public void stop() {
         running.set(false);
         handler.removeCallbacksAndMessages(null);
+        cancelArtMotion(artView);
+        cancelArtMotion(artNextView);
+        logoView.animate().cancel();
         try {
             Glide.with(appContext).clear(artView);
             Glide.with(appContext).clear(artNextView);
@@ -185,8 +208,8 @@ public final class ScreensaverRenderer {
         ImageView incoming = showingPrimary ? artNextView : artView;
         ImageView outgoing = showingPrimary ? artView : artNextView;
 
-        incoming.setVisibility(View.VISIBLE);
-        incoming.setAlpha(0f);
+        // Reset only the incoming layer so the outgoing Ken Burns continues through the fade.
+        prepareIncomingArt(incoming);
 
         int w = root.getWidth() > 0 ? root.getWidth() : 1920;
         int h = root.getHeight() > 0 ? root.getHeight() : 1080;
@@ -200,28 +223,34 @@ public final class ScreensaverRenderer {
                         .skipMemoryCache(false))
                 .into(incoming);
 
-        // Crossfade
-        AlphaAnimation in = new AlphaAnimation(0f, 1f);
-        in.setDuration(CROSSFADE_MS);
-        in.setFillAfter(true);
-        AlphaAnimation out = new AlphaAnimation(1f, 0f);
-        out.setDuration(CROSSFADE_MS);
-        out.setFillAfter(true);
-        out.setAnimationListener(new Animation.AnimationListener() {
-            @Override public void onAnimationStart(Animation animation) { }
-            @Override public void onAnimationRepeat(Animation animation) { }
-            @Override
-            public void onAnimationEnd(Animation animation) {
-                outgoing.setAlpha(0f);
-                outgoing.setVisibility(View.GONE);
-                Glide.with(appContext).clear(outgoing);
-            }
-        });
-        incoming.setAlpha(1f);
-        incoming.startAnimation(in);
+        startKenBurns(incoming);
+
+        // Property alpha (not Animation) so scale and fade share one compositor path — no jumps.
+        incoming.animate()
+                .alpha(1f)
+                .setDuration(CROSSFADE_MS)
+                .setInterpolator(kenBurnsInterpolator)
+                .start();
+
         if (outgoing.getVisibility() == View.VISIBLE) {
-            outgoing.startAnimation(out);
+            // Animate alpha only — do not cancel the outgoing scale animator.
+            outgoing.animate()
+                    .alpha(0f)
+                    .setDuration(CROSSFADE_MS)
+                    .setInterpolator(kenBurnsInterpolator)
+                    .withEndAction(() -> {
+                        if (!running.get()) return;
+                        cancelArtMotion(outgoing);
+                        outgoing.setVisibility(View.GONE);
+                        try {
+                            Glide.with(appContext).clear(outgoing);
+                        } catch (Exception e) {
+                            Log.w(TAG, "Glide clear outgoing: " + e.getMessage());
+                        }
+                    })
+                    .start();
         }
+
         showingPrimary = !showingPrimary;
 
         // Transparent logo only — never invent text substitutes.
@@ -229,12 +258,28 @@ public final class ScreensaverRenderer {
             String logoUrl = PlexApi.buildImageUrl(serverUrl, item.logoPath, token);
             logoView.setVisibility(View.VISIBLE);
             logoView.setAlpha(0f);
+            int[] max = logoMaxPx(root);
             Glide.with(appContext)
                     .load(logoUrl)
                     .apply(new RequestOptions()
                             .fitCenter()
                             .diskCacheStrategy(DiskCacheStrategy.NONE)
                             .skipMemoryCache(false))
+                    .listener(new RequestListener<Drawable>() {
+                        @Override
+                        public boolean onLoadFailed(@Nullable GlideException e, Object model,
+                                                    Target<Drawable> target, boolean isFirstResource) {
+                            return false;
+                        }
+
+                        @Override
+                        public boolean onResourceReady(Drawable resource, Object model,
+                                                       Target<Drawable> target, DataSource dataSource,
+                                                       boolean isFirstResource) {
+                            handler.post(() -> applyLogoSize(logoView, resource, max[0], max[1]));
+                            return false;
+                        }
+                    })
                     .into(logoView);
             logoView.animate().alpha(1f).setDuration(CROSSFADE_MS).start();
         } else {
@@ -254,6 +299,89 @@ public final class ScreensaverRenderer {
         } else {
             dateView.setVisibility(View.GONE);
         }
+    }
+
+    private void prepareIncomingArt(ImageView incoming) {
+        incoming.animate().cancel();
+        incoming.setScaleX(1f);
+        incoming.setScaleY(1f);
+        incoming.setAlpha(0f);
+        incoming.setVisibility(View.VISIBLE);
+        centerPivot(incoming);
+    }
+
+    private void startKenBurns(ImageView view) {
+        centerPivot(view);
+        // Continue past the advance tick so the outgoing layer keeps zooming through crossfade.
+        long duration = Math.max(MIN_INTERVAL_MS, intervalMs + CROSSFADE_MS);
+        view.animate()
+                .scaleX(KEN_BURNS_END_SCALE)
+                .scaleY(KEN_BURNS_END_SCALE)
+                .setDuration(duration)
+                .setInterpolator(kenBurnsInterpolator)
+                .start();
+    }
+
+    private static void centerPivot(ImageView view) {
+        int w = view.getWidth();
+        int h = view.getHeight();
+        if (w > 0 && h > 0) {
+            view.setPivotX(w / 2f);
+            view.setPivotY(h / 2f);
+        } else {
+            view.post(() -> {
+                view.setPivotX(view.getWidth() / 2f);
+                view.setPivotY(view.getHeight() / 2f);
+            });
+        }
+    }
+
+    private void cancelArtMotion(ImageView view) {
+        view.animate().cancel();
+        view.setScaleX(1f);
+        view.setScaleY(1f);
+        view.setAlpha(0f);
+    }
+
+    /**
+     * Fits logo into max box, preserves aspect, never upscales past native pixels.
+     * Returns {@code [widthPx, heightPx]}.
+     */
+    static int[] fittedLogoSize(int intrinsicW, int intrinsicH, int maxW, int maxH) {
+        if (intrinsicW <= 0 || intrinsicH <= 0 || maxW <= 0 || maxH <= 0) {
+            return new int[]{0, 0};
+        }
+        float scale = Math.min(1f, Math.min((float) maxW / intrinsicW, (float) maxH / intrinsicH));
+        return new int[]{Math.max(1, Math.round(intrinsicW * scale)),
+                Math.max(1, Math.round(intrinsicH * scale))};
+    }
+
+    /** Max logo box in px from density + screen fraction (≤ ~25% of prior 120×720dp). */
+    static int[] logoMaxPx(View root) {
+        DisplayMetrics dm = root.getResources().getDisplayMetrics();
+        int screenW = root.getWidth() > 0 ? root.getWidth() : dm.widthPixels;
+        int screenH = root.getHeight() > 0 ? root.getHeight() : dm.heightPixels;
+        int fromDpW = Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, LOGO_MAX_WIDTH_DP, dm));
+        int fromDpH = Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, LOGO_HEIGHT_DP, dm));
+        int maxW = Math.min(fromDpW, Math.round(screenW * LOGO_MAX_SCREEN_WIDTH_FRAC));
+        int maxH = Math.min(fromDpH, Math.round(screenH * LOGO_MAX_SCREEN_HEIGHT_FRAC));
+        return new int[]{Math.max(1, maxW), Math.max(1, maxH)};
+    }
+
+    private static void applyLogoSize(ImageView logoView, Drawable resource, int maxW, int maxH) {
+        if (logoView == null || resource == null) return;
+        int[] size = fittedLogoSize(resource.getIntrinsicWidth(), resource.getIntrinsicHeight(),
+                maxW, maxH);
+        if (size[0] <= 0 || size[1] <= 0) return;
+        ViewGroup.LayoutParams lp = logoView.getLayoutParams();
+        if (lp == null) return;
+        lp.width = size[0];
+        lp.height = size[1];
+        logoView.setLayoutParams(lp);
+        logoView.setScaleType(ImageView.ScaleType.FIT_START);
+        logoView.setAdjustViewBounds(true);
     }
 
     private void preloadNext() {
@@ -289,10 +417,13 @@ public final class ScreensaverRenderer {
                             .preload(w, h);
                     if (showLogo && item.hasTransparentLogo()) {
                         String logoUrl = PlexApi.buildImageUrl(serverUrl, item.logoPath, token);
+                        int[] max = logoMaxPx(root);
                         Glide.with(appContext)
                                 .load(logoUrl)
-                                .apply(new RequestOptions().diskCacheStrategy(DiskCacheStrategy.NONE))
-                                .preload();
+                                .apply(new RequestOptions()
+                                        .override(max[0], max[1])
+                                        .diskCacheStrategy(DiskCacheStrategy.NONE))
+                                .preload(max[0], max[1]);
                     }
                 });
             }

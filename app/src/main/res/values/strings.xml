@@ -57,4 +57,22 @@
     <string name="play_now">Play Now</string>
     <string name="cancel">Cancel</string>
 
+    <!-- Screensaver / DayDream -->
+    <string name="screensaver_settings">Plex Artwork Screensaver</string>
+    <string name="screensaver_label">Plex Artwork</string>
+    <string name="screensaver_how_to_title">How to enable on Zidoo</string>
+    <string name="screensaver_how_to_summary">Advanced / Android Settings → Display → Screensaver → choose “Plex Artwork”. Do not use Image Player “set as screensaver” for this. Home Theater modes may override — exit HT if needed.</string>
+    <string name="screensaver_interval_title">Slide interval (seconds)</string>
+    <string name="screensaver_interval_summary">How long each artwork stays on screen</string>
+    <string name="screensaver_allow_lower_res_title">Allow lower-res art</string>
+    <string name="screensaver_allow_lower_res_summary">Off by default. When off, only genuine 4K (or larger) fanart is shown — never upscaled 1080p labeled as 4K.</string>
+    <string name="screensaver_show_logo_title">Show transparent logos</string>
+    <string name="screensaver_show_logo_summary">Uses Plex clearLogo when available. Titles are never drawn as text substitutes.</string>
+    <string name="screensaver_show_date_title">Show original release year</string>
+    <string name="screensaver_show_date_summary">From Plex originallyAvailableAt / year</string>
+    <string name="screensaver_preview_title">Preview screensaver</string>
+    <string name="screensaver_preview_summary">Runs the same renderer as DayDream (tap to exit)</string>
+    <string name="screensaver_art_desc">Plex background artwork</string>
+    <string name="screensaver_logo_desc">Plex clear logo</string>
+
 </resources>

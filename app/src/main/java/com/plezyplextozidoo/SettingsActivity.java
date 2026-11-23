@@ -417,38 +417,123 @@ public class SettingsActivity extends AppCompatActivity
         }
     }
 
+    /**
+     * Pure classification of one export-file entry for import.
+     * Matches v2026.11.2 {@code PlezyPlexToZidooSettings.txt} keys (and current).
+     */
+    static final class ImportAction {
+        enum Kind { SECURE_PLEX_TOKEN, SECURE_SMB_PASSWORD, PREF_STRING, PREF_BOOLEAN, SKIP }
+
+        final Kind kind;
+        final String storageKey;
+        final String stringValue;
+        final boolean booleanValue;
+
+        ImportAction(Kind kind, String storageKey, String stringValue, boolean booleanValue) {
+            this.kind = kind;
+            this.storageKey = storageKey;
+            this.stringValue = stringValue;
+            this.booleanValue = booleanValue;
+        }
+    }
+
+    /**
+     * Maps a single JSON export entry to the storage destination used on import.
+     * Fake credentials only in tests — never log values.
+     */
+    static ImportAction classifyImportEntry(String key, Object rawValue) {
+        if (key == null) {
+            return new ImportAction(ImportAction.Kind.SKIP, null, null, false);
+        }
+        String asString = (rawValue != null) ? rawValue.toString() : "";
+        if ("plex_token".equals(key) || "plex_access_token".equals(key)) {
+            return new ImportAction(ImportAction.Kind.SECURE_PLEX_TOKEN, "plex_access_token",
+                    asString.trim(), false);
+        }
+        if (key.startsWith("smbPassword")) {
+            String suffix = key.substring("smbPassword".length());
+            return new ImportAction(ImportAction.Kind.SECURE_SMB_PASSWORD,
+                    SecureStorage.smbSecureKey(suffix), asString, false);
+        }
+        // Boolean switches (skip_intros, etc.) — string prefs (URLs, paths, usernames, intervals).
+        if (rawValue instanceof Boolean) {
+            return new ImportAction(ImportAction.Kind.PREF_BOOLEAN, key, null,
+                    (Boolean) rawValue);
+        }
+        if ("true".equalsIgnoreCase(asString) || "false".equalsIgnoreCase(asString)) {
+            return new ImportAction(ImportAction.Kind.PREF_BOOLEAN, key, null,
+                    Boolean.parseBoolean(asString));
+        }
+        return new ImportAction(ImportAction.Kind.PREF_STRING, key,
+                asString.isEmpty() ? null : asString, false);
+    }
+
+    /**
+     * Applies a full export map into destination maps (no Android UI). Used by unit tests
+     * and keeps import key routing consistent with {@link #setPreferenceOnImport}.
+     */
+    static void applyImportMap(Map<String, ?> exportMap,
+                               Map<String, String> secureOut,
+                               Map<String, Object> prefsOut) {
+        if (exportMap == null) {
+            return;
+        }
+        for (Map.Entry<String, ?> entry : exportMap.entrySet()) {
+            ImportAction action = classifyImportEntry(entry.getKey(), entry.getValue());
+            switch (action.kind) {
+                case SECURE_PLEX_TOKEN:
+                case SECURE_SMB_PASSWORD:
+                    secureOut.put(action.storageKey, action.stringValue != null ? action.stringValue : "");
+                    break;
+                case PREF_STRING:
+                    prefsOut.put(action.storageKey, action.stringValue);
+                    break;
+                case PREF_BOOLEAN:
+                    prefsOut.put(action.storageKey, action.booleanValue);
+                    break;
+                case SKIP:
+                default:
+                    break;
+            }
+        }
+    }
+
     public void setPreferenceOnImport(Map.Entry<String, ?> entry)
     {
-        String key = entry.getKey();
-        if("plex_token".equals(key) || "plex_access_token".equals(key))
-        {
-            String value = (entry.getValue() != null) ? entry.getValue().toString().trim() : "";
-            SecureStorage.getInstance(getApplicationContext()).edit().putString("plex_access_token", value).apply();
-            EditTextPreference tokenPref = settingsFragment.findPreference("plex_token");
-            if(tokenPref != null)
-            {
-                tokenPref.setSummary(value.isEmpty() ? "Not set (optional fallback)" : "********");
+        ImportAction action = classifyImportEntry(entry.getKey(), entry.getValue());
+        switch (action.kind) {
+            case SECURE_PLEX_TOKEN: {
+                SecureStorage.getInstance(getApplicationContext()).edit()
+                        .putString("plex_access_token", action.stringValue).apply();
+                EditTextPreference tokenPref = settingsFragment.findPreference("plex_token");
+                if (tokenPref != null) {
+                    String v = action.stringValue != null ? action.stringValue : "";
+                    tokenPref.setSummary(v.isEmpty() ? "Not set (optional fallback)" : "********");
+                }
+                return;
             }
-            return;
+            case SECURE_SMB_PASSWORD: {
+                String key = entry.getKey();
+                String suffix = key.substring("smbPassword".length());
+                SecureStorage.putSmbPassword(getApplicationContext(), suffix,
+                        action.stringValue != null ? action.stringValue : "");
+                EditTextPreference smbPref = settingsFragment.findPreference(key);
+                if (smbPref != null) {
+                    String v = action.stringValue != null ? action.stringValue : "";
+                    smbPref.setSummary(v.isEmpty() ? "Not set" : "********");
+                }
+                return;
+            }
+            case SKIP:
+                return;
+            default:
+                break;
         }
 
-        if(key != null && key.startsWith("smbPassword"))
-        {
-            String suffix = key.substring("smbPassword".length());
-            String value = (entry.getValue() != null) ? entry.getValue().toString() : "";
-            SecureStorage.putSmbPassword(getApplicationContext(), suffix, value);
-            EditTextPreference smbPref = settingsFragment.findPreference(key);
-            if(smbPref != null)
-            {
-                smbPref.setSummary(value.isEmpty() ? "Not set" : "********");
-            }
-            return;
-        }
-
-        Preference pref = settingsFragment.findPreference(key);
+        Preference pref = settingsFragment.findPreference(entry.getKey());
         if(pref instanceof EditTextPreference)
         {
-            if(entry.getValue().toString().isEmpty())
+            if(entry.getValue() == null || entry.getValue().toString().isEmpty())
             {
                 ((EditTextPreference)pref).setText(null);
             }
@@ -459,7 +544,7 @@ public class SettingsActivity extends AppCompatActivity
         }
         else if(pref instanceof SwitchPreference)
         {
-            if(entry.getValue().toString().isEmpty())
+            if(entry.getValue() == null || entry.getValue().toString().isEmpty())
             {
                 ((SwitchPreference)pref).setChecked(false);
             }

@@ -9,7 +9,7 @@ body:
       options:
         - label: I have searched the [existing issues](https://github.com/nagel0r/PlezyPlexToZidoo/issues) and confirmed this is not a duplicate
           required: true
-        - label: I am running the latest version of PlezyPlexToZidoo
+        - label: I am running the latest version of PlezyToZidoo+
           required: true
         - label: I have redacted any personal information (IP addresses, tokens, passwords, file paths, server URLs) from this report
           required: true
@@ -17,9 +17,9 @@ body:
   - type: input
     id: version
     attributes:
-      label: PlezyPlexToZidoo version
-      description: Found in Settings > Version
-      placeholder: "2026.11.1"
+      label: PlezyToZidoo+ version
+      description: Found in Settings (version top-right)
+      placeholder: "2026.11.13"
     validations:
       required: true
 

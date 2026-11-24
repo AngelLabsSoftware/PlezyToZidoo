@@ -24,7 +24,7 @@ It also brings across some of the features you might miss when using an external
 
 As an added bonus, it includes a cinematic 4K screensaver using artwork and title logos from your own Plex library.
 
-This is an independent project by **Angel Labs**. It is not affiliated with, endorsed by, or an official product of Plezy, Plex, or Zidoo. The GitHub repository remains `nagel0r/PlezyPlexToZidoo` (private); the Android package id stays `com.plezyplextozidoo` so signed updates install over previous builds.
+This is an independent project by **Angel Labs**. It is not affiliated with, endorsed by, or an official product of Plezy, Plex, or Zidoo. The GitHub repository is `AngelLabsSoftware/PlezyToZidoo` (private); the Android package id stays `com.plezyplextozidoo` so signed updates install over previous builds.
 
 ## Why I made this
 
@@ -153,7 +153,7 @@ You don't need to use the Zidoo Image Player or manually download any artwork.
 
 ## Installation
 
-1. Download the latest signed APK from [GitHub Releases](https://github.com/nagel0r/PlezyPlexToZidoo/releases).
+1. Download the latest signed APK from [GitHub Releases](https://github.com/AngelLabsSoftware/PlezyToZidoo/releases).
 2. Install the APK on your Zidoo.
 3. Open PlezyToZidoo+ and configure your path substitution settings.
 4. In Plezy, configure the custom/external player package shown below.

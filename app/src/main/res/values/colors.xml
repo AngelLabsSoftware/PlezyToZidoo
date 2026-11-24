@@ -4,7 +4,7 @@
     <color name="plex_purple">#FFAA5CC3</color>
     <color name="plex_blue">#FF00A4DC</color>
     <color name="plex_dark">#FF20123A</color>
-    <color name="ic_launcher_background">#FF20123A</color>
+    <color name="ic_launcher_background">#FFD28818</color>
 
     <!-- Legacy Material names remapped to charcoal for monochrome TV UI -->
     <color name="purple_200">#FF9E9E9E</color>

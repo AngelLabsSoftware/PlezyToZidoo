@@ -1,8 +1,6 @@
 package com.plezyplextozidoo;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -11,20 +9,20 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
-import android.text.InputType;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.view.View;
+import android.widget.EditText;
+import android.widget.ScrollView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
-import androidx.preference.EditTextPreference;
-import androidx.preference.ListPreference;
-import androidx.preference.Preference;
-import androidx.preference.PreferenceFragmentCompat;
+import androidx.appcompat.widget.AppCompatButton;
+import androidx.appcompat.widget.SwitchCompat;
 import androidx.preference.PreferenceManager;
-import androidx.preference.SwitchPreference;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -37,23 +35,52 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.lang.reflect.Type;
 import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-public class SettingsActivity extends AppCompatActivity
-{
-    private final String backupFile = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS) + "/PlezyPlexToZidooSettings.txt";
-    private SettingsFragment settingsFragment;
-    private String settingsRootKey;
-    private String scrollToPreference;
+/**
+ * TV-oriented settings dashboard. Preference keys match the previous PreferenceFragment
+ * screen so upgrades keep saved values. Import/export unchanged in format.
+ */
+public class SettingsActivity extends AppCompatActivity {
+
+    private final String backupFile = Environment.getExternalStoragePublicDirectory(
+            Environment.DIRECTORY_DOWNLOADS) + "/PlezyPlexToZidooSettings.txt";
     private static final int PERMISSION_REQUEST_IMPORT = 1;
     private static final int PERMISSION_REQUEST_EXPORT = 2;
-    private final String[] permissions = {Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE};
+    private final String[] permissions = {
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE
+    };
+
+    private SharedPreferences prefs;
+    private SharedPreferences securePrefs;
+    private ScrollView settingsScroll;
+
+    private SwitchCompat swUseZidoo;
+    private SwitchCompat swShowTitle;
+    private SwitchCompat swSkipIntros;
+    private SwitchCompat swSkipCredits;
+    private SwitchCompat swRecentOnly;
+    private SwitchCompat swAllowLowerRes;
+    private SwitchCompat swShowLogo;
+    private SwitchCompat swTextFallback;
+    private SwitchCompat swShowYear;
+    private SwitchCompat swDebug;
+    private SwitchCompat swExportPasswords;
+
+    private EditText inputServerUrl;
+    private EditText inputPlexToken;
+    private EditText inputPathReplace;
+    private EditText inputPathWith;
+    private TextView overlayStatus;
+
+    private boolean suppressWatchers;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState)
-    {
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         SecureStorage.removeLegacyPlaintextPassword(getApplicationContext());
@@ -62,397 +89,413 @@ public class SettingsActivity extends AppCompatActivity
         String deviceId = SecureStorage.getDeviceId(getApplicationContext());
         PlexApi.setClientIdentity(Build.MODEL, deviceId, BuildConfig.VERSION_NAME);
 
-        setContentView(R.layout.settings_activity);
-        if (savedInstanceState == null)
-        {
-            getSupportFragmentManager()
-                    .beginTransaction()
-                    .replace(R.id.settings, new SettingsFragment())
-                    .commit();
-        }
-    }
+        setContentView(R.layout.activity_settings_dashboard);
+        prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        securePrefs = SecureStorage.getInstance(this);
 
-    public static class SettingsFragment extends PreferenceFragmentCompat
-    {
-        @Override
-        public void onCreatePreferences(Bundle savedInstanceState, String rootKey)
-        {
-            SettingsActivity activity = (SettingsActivity) requireActivity();
-            activity.settingsFragment = this;
-            activity.settingsRootKey = rootKey;
+        settingsScroll = findViewById(R.id.settingsScroll);
+        bindToggle(R.id.rowUseZidoo, R.string.useZidooPlayer_title);
+        bindToggle(R.id.rowShowTitle, R.string.showTitle_title);
+        bindToggle(R.id.rowSkipIntros, R.string.skip_intros_title);
+        bindToggle(R.id.rowSkipCredits, R.string.skip_credits_title);
+        bindToggle(R.id.rowRecentOnly, R.string.screensaver_recent_title);
+        bindToggle(R.id.rowAllowLowerRes, R.string.screensaver_allow_lower_res_title);
+        bindToggle(R.id.rowShowLogo, R.string.screensaver_show_logo_title);
+        bindToggle(R.id.rowTextFallback, R.string.screensaver_allow_text_title_title);
+        bindToggle(R.id.rowShowYear, R.string.screensaver_show_date_title);
+        bindToggle(R.id.rowDebug, R.string.debug_title);
+        bindToggle(R.id.rowExportPasswords, R.string.export_include_passwords_title);
 
-            activity.showRootSettings(null);
-        }
+        swUseZidoo = switchOf(R.id.rowUseZidoo);
+        swShowTitle = switchOf(R.id.rowShowTitle);
+        swSkipIntros = switchOf(R.id.rowSkipIntros);
+        swSkipCredits = switchOf(R.id.rowSkipCredits);
+        swRecentOnly = switchOf(R.id.rowRecentOnly);
+        swAllowLowerRes = switchOf(R.id.rowAllowLowerRes);
+        swShowLogo = switchOf(R.id.rowShowLogo);
+        swTextFallback = switchOf(R.id.rowTextFallback);
+        swShowYear = switchOf(R.id.rowShowYear);
+        swDebug = switchOf(R.id.rowDebug);
+        swExportPasswords = switchOf(R.id.rowExportPasswords);
 
-        @SuppressLint("RestrictedApi")
-        @Override
-        protected void onBindPreferences()
-        {
-            super.onBindPreferences();
+        inputServerUrl = findViewById(R.id.inputServerUrl);
+        inputPlexToken = findViewById(R.id.inputPlexToken);
+        inputPathReplace = findViewById(R.id.inputPathReplace);
+        inputPathWith = findViewById(R.id.inputPathWith);
+        overlayStatus = findViewById(R.id.overlayStatus);
 
-            SettingsActivity activity = (SettingsActivity) getActivity();
-            if(activity != null && activity.scrollToPreference != null)
-            {
-                scrollToPreference(activity.scrollToPreference);
-                activity.scrollToPreference = null;
-            }
-        }
+        AppCompatButton btnPreview = findViewById(R.id.btnPreviewScreensaver);
+        AppCompatButton btnTest = findViewById(R.id.btnTestConnection);
+        AppCompatButton btnManage = findViewById(R.id.btnManageRules);
+        AppCompatButton btnImport = findViewById(R.id.btnImport);
+        AppCompatButton btnExport = findViewById(R.id.btnExport);
+        clearTint(btnPreview, btnTest, btnManage, btnImport, btnExport);
+
+        loadFromPrefs();
+        wireSwitches();
+        wireSegments();
+        wireTextFields();
+        wireButtons(btnPreview, btnTest, btnManage, btnImport, btnExport);
+        wireOverlayStatus();
+        ensureFocusScroll();
     }
 
     @Override
-    protected void onStart()
-    {
+    protected void onStart() {
         super.onStart();
-        if (settingsFragment != null && settingsFragment.findPreference("overlay_permission") != null)
-        {
-            setOverlayPermissionPreference();
+        refreshOverlayStatus();
+    }
+
+    private void bindToggle(int includeId, int labelRes) {
+        View row = findViewById(includeId);
+        TextView label = row.findViewById(R.id.toggleLabel);
+        label.setText(labelRes);
+    }
+
+    private SwitchCompat switchOf(int includeId) {
+        return findViewById(includeId).findViewById(R.id.toggleSwitch);
+    }
+
+    private void clearTint(AppCompatButton... buttons) {
+        for (AppCompatButton b : buttons) {
+            // Public API (minSdk 28) — avoids RestrictedApi on setSupportBackgroundTintList.
+            b.setBackgroundTintList(null);
+            b.setBackgroundResource(R.drawable.btn_tv_focus);
         }
     }
 
-    @Override
-    public void onBackPressed()
-    {
-        if (settingsFragment == null)
-        {
-            super.onBackPressed();
-            return;
-        }
+    private void loadFromPrefs() {
+        suppressWatchers = true;
+        swUseZidoo.setChecked(prefs.getBoolean("useZidooPlayer", true));
+        swShowTitle.setChecked(prefs.getBoolean("showTitle", true));
+        swSkipIntros.setChecked(prefs.getBoolean("skip_intros", true));
+        swSkipCredits.setChecked(prefs.getBoolean("skip_credits", true));
+        swRecentOnly.setChecked(prefs.getBoolean("screensaver_recent_only", false));
+        swAllowLowerRes.setChecked(prefs.getBoolean("screensaver_allow_lower_res", false));
+        swShowLogo.setChecked(prefs.getBoolean("screensaver_show_logo", true));
+        swTextFallback.setChecked(prefs.getBoolean("screensaver_allow_text_title", false));
+        swShowYear.setChecked(prefs.getBoolean("screensaver_show_date", true));
+        swDebug.setChecked(prefs.getBoolean("debug", false));
+        swExportPasswords.setChecked(prefs.getBoolean("export_include_passwords", false));
 
-        Preference substitutionLink = settingsFragment.findPreference("substitution_link");
-        if (substitutionLink != null)
-        {
-            super.onBackPressed();
-        }
-        else
-        {
-            showRootSettings("substitution_link");
-        }
+        inputServerUrl.setText(prefs.getString("plex_server_url", ""));
+        String token = securePrefs.getString("plex_access_token", "");
+        inputPlexToken.setText(token != null ? token : "");
+        inputPathReplace.setText(prefs.getString("path_to_replace", ""));
+        inputPathWith.setText(prefs.getString("replaced_with", ""));
+        updatePlayerDependentEnabled();
+        suppressWatchers = false;
     }
 
-    public void showRootSettings(@Nullable String scrollToPref)
-    {
-        if (settingsFragment == null)
-        {
-            return;
-        }
-
-        scrollToPreference = scrollToPref;
-        settingsFragment.setPreferencesFromResource(R.xml.root_preferences, settingsRootKey);
-        setSmbPasswordPreference();
-        setPlexTokenPreference();
-        setPlexServerUrlPreference();
-        setTestConnectionPreference();
-        setSkipBehaviorPreference();
-        setOverlayPermissionPreference();
-        setScreensaverPreferences();
-
-        Preference substitutionLink = settingsFragment.findPreference("substitution_link");
-        if (substitutionLink != null)
-        {
-            substitutionLink.setOnPreferenceClickListener(preference ->
-            {
-                settingsFragment.setPreferencesFromResource(R.xml.substitution_preferences, settingsRootKey);
-                setSmbPasswordPreference();
-                return true;
-            });
-        }
+    private void updatePlayerDependentEnabled() {
+        boolean on = swUseZidoo.isChecked();
+        swShowTitle.setEnabled(on);
+        swSkipIntros.setEnabled(on);
+        swSkipCredits.setEnabled(on);
+        findViewById(R.id.segSkipBehavior).setEnabled(on);
+        overlayStatus.setEnabled(on);
+        overlayStatus.setAlpha(on ? 1f : 0.45f);
     }
 
-    private void setPlexTokenPreference()
-    {
-        EditTextPreference tokenPref = settingsFragment.findPreference("plex_token");
-        if (tokenPref == null) return;
+    private void wireSwitches() {
+        swUseZidoo.setOnCheckedChangeListener((b, v) -> {
+            if (suppressWatchers) return;
+            prefs.edit().putBoolean("useZidooPlayer", v).apply();
+            updatePlayerDependentEnabled();
+        });
+        bindBool(swShowTitle, "showTitle");
+        bindBool(swSkipIntros, "skip_intros");
+        bindBool(swSkipCredits, "skip_credits");
+        bindBool(swRecentOnly, "screensaver_recent_only");
+        bindBool(swAllowLowerRes, "screensaver_allow_lower_res");
+        bindBool(swShowLogo, "screensaver_show_logo");
+        bindBool(swTextFallback, "screensaver_allow_text_title");
+        bindBool(swShowYear, "screensaver_show_date");
+        bindBool(swDebug, "debug");
+        bindBool(swExportPasswords, "export_include_passwords");
+    }
 
-        Context context = settingsFragment.requireContext();
-        SharedPreferences securePrefs = SecureStorage.getInstance(context);
-
-        String existing = securePrefs.getString("plex_access_token", "");
-        tokenPref.setSummary((existing != null && !existing.isEmpty()) ? "********" : "Not set (optional fallback)");
-
-        tokenPref.setOnBindEditTextListener(editText ->
-                editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD));
-
-        tokenPref.setOnPreferenceChangeListener((preference, newValue) ->
-        {
-            String value = (newValue != null) ? newValue.toString().trim() : "";
-            securePrefs.edit().putString("plex_access_token", value).apply();
-            tokenPref.setSummary(value.isEmpty() ? "Not set (optional fallback)" : "********");
-            return false;
+    private void bindBool(SwitchCompat sw, String key) {
+        sw.setOnCheckedChangeListener((b, v) -> {
+            if (suppressWatchers) return;
+            prefs.edit().putBoolean(key, v).apply();
         });
     }
 
-    private void setPlexServerUrlPreference()
-    {
-        EditTextPreference serverUrlPref = settingsFragment.findPreference("plex_server_url");
-        if (serverUrlPref == null) return;
+    private void wireSegments() {
+        SegmentedControl.bind(findViewById(R.id.segSkipBehavior),
+                getStringArray(R.array.skip_behavior_segment_labels),
+                getStringArray(R.array.skip_behavior_values),
+                prefs.getString("skip_behavior", "manual"),
+                value -> prefs.edit().putString("skip_behavior", value).apply());
 
-        serverUrlPref.setOnPreferenceChangeListener((preference, newValue) ->
-        {
-            String trimmed = (newValue != null) ? newValue.toString().trim() : "";
-            while (trimmed.endsWith("/"))
-            {
+        String upNext = prefs.getString(UpNextActivity.PREF_UP_NEXT_COUNTDOWN_SEC,
+                String.valueOf(UpNextActivity.DEFAULT_UP_NEXT_COUNTDOWN_SEC));
+        SegmentedControl.bind(findViewById(R.id.segUpNextCountdown),
+                getStringArray(R.array.up_next_countdown_labels),
+                getStringArray(R.array.up_next_countdown_values),
+                String.valueOf(UpNextActivity.normalizeCountdownSec(upNext)),
+                value -> prefs.edit().putString(UpNextActivity.PREF_UP_NEXT_COUNTDOWN_SEC, value).apply());
+
+        SegmentedControl.bind(findViewById(R.id.segLibrary),
+                getStringArray(R.array.screensaver_library_labels),
+                getStringArray(R.array.screensaver_library_values),
+                prefs.getString("screensaver_library", "both"),
+                value -> prefs.edit().putString("screensaver_library", value).apply());
+
+        SegmentedControl.bind(findViewById(R.id.segLogoSize),
+                getStringArray(R.array.screensaver_logo_size_entries),
+                getStringArray(R.array.screensaver_logo_size_values),
+                ScreensaverRenderer.normalizeLogoSize(
+                        prefs.getString("screensaver_logo_size", ScreensaverRenderer.LOGO_SIZE_MEDIUM)),
+                value -> prefs.edit().putString("screensaver_logo_size", value).apply());
+
+        String interval = normalizeInterval(prefs.getString("screensaver_interval_sec", "20"));
+        SegmentedControl.bind(findViewById(R.id.segSlideDuration),
+                getStringArray(R.array.screensaver_interval_labels),
+                getStringArray(R.array.screensaver_interval_values),
+                interval,
+                value -> prefs.edit().putString("screensaver_interval_sec", value).apply());
+
+        SegmentedControl.bind(findViewById(R.id.segCrossfade),
+                getStringArray(R.array.screensaver_crossfade_labels),
+                getStringArray(R.array.screensaver_crossfade_values),
+                prefs.getString("screensaver_crossfade_sec", "1"),
+                value -> prefs.edit().putString("screensaver_crossfade_sec", value).apply());
+
+        SegmentedControl.bind(findViewById(R.id.segAnimSpeed),
+                getStringArray(R.array.screensaver_anim_speed_labels),
+                getStringArray(R.array.screensaver_anim_speed_values),
+                prefs.getString("screensaver_anim_speed", "1"),
+                value -> prefs.edit().putString("screensaver_anim_speed", value).apply());
+    }
+
+    /** Map legacy 10/15 → nearest supported segment value without rewriting storage until user picks. */
+    static String normalizeInterval(String raw) {
+        if ("10".equals(raw) || "15".equals(raw)) return "20";
+        if ("20".equals(raw) || "30".equals(raw) || "45".equals(raw) || "60".equals(raw)) return raw;
+        return "20";
+    }
+
+    private String[] getStringArray(int id) {
+        return getResources().getStringArray(id);
+    }
+
+    private void wireTextFields() {
+        inputServerUrl.addTextChangedListener(simpleWatcher(s -> {
+            if (suppressWatchers) return;
+            // Persist trimmed; port dialog on focus loss / test.
+            String trimmed = s.trim();
+            while (trimmed.endsWith("/")) {
                 trimmed = trimmed.substring(0, trimmed.length() - 1);
             }
-            final String value = trimmed;
-            // Offer :32400 for bare LAN hosts only — never silently rewrite ports/proxies.
-            final String suggested = PlexApi.suggestAppendDefaultPlexPort(value);
-            if (suggested != null && !suggested.equals(value))
-            {
-                new AlertDialog.Builder(settingsFragment.requireContext())
-                        .setTitle(R.string.plex_server_url_port_title)
-                        .setMessage(getString(R.string.plex_server_url_port_message, suggested))
-                        .setPositiveButton(R.string.plex_server_url_port_yes,
-                                (d, w) -> applyPlexServerUrl(serverUrlPref, suggested))
-                        .setNegativeButton(R.string.plex_server_url_port_no,
-                                (d, w) -> applyPlexServerUrl(serverUrlPref, value))
-                        .setCancelable(true)
-                        .show();
-                return false;
+            prefs.edit().putString("plex_server_url", trimmed).apply();
+        }));
+        inputServerUrl.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus) maybeOfferPort();
+        });
+
+        inputPlexToken.addTextChangedListener(simpleWatcher(s -> {
+            if (suppressWatchers) return;
+            securePrefs.edit().putString("plex_access_token", s.trim()).apply();
+        }));
+
+        inputPathReplace.addTextChangedListener(simpleWatcher(s -> {
+            if (suppressWatchers) return;
+            prefs.edit().putString("path_to_replace", s).apply();
+        }));
+        inputPathWith.addTextChangedListener(simpleWatcher(s -> {
+            if (suppressWatchers) return;
+            prefs.edit().putString("replaced_with", s).apply();
+        }));
+    }
+
+    private void maybeOfferPort() {
+        String value = inputServerUrl.getText() != null ? inputServerUrl.getText().toString().trim() : "";
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        final String suggested = PlexApi.suggestAppendDefaultPlexPort(value);
+        if (suggested == null || suggested.equals(value)) return;
+        final String current = value;
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.plex_server_url_port_title)
+                .setMessage(getString(R.string.plex_server_url_port_message, suggested))
+                .setPositiveButton(R.string.plex_server_url_port_yes, (d, w) -> {
+                    suppressWatchers = true;
+                    inputServerUrl.setText(suggested);
+                    suppressWatchers = false;
+                    prefs.edit().putString("plex_server_url", suggested).apply();
+                })
+                .setNegativeButton(R.string.plex_server_url_port_no, (d, w) ->
+                        prefs.edit().putString("plex_server_url", current).apply())
+                .setCancelable(true)
+                .show();
+    }
+
+    private interface StringConsumer {
+        void accept(String s);
+    }
+
+    private TextWatcher simpleWatcher(StringConsumer consumer) {
+        return new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(Editable s) {
+                consumer.accept(s != null ? s.toString() : "");
             }
-            applyPlexServerUrl(serverUrlPref, value);
-            return false;
+        };
+    }
+
+    private void wireButtons(AppCompatButton btnPreview, AppCompatButton btnTest,
+                             AppCompatButton btnManage, AppCompatButton btnImport,
+                             AppCompatButton btnExport) {
+        btnPreview.setOnClickListener(v ->
+                startActivity(new Intent(this, ScreensaverPreviewActivity.class)));
+        btnManage.setOnClickListener(v ->
+                startActivity(new Intent(this, SubstitutionRulesActivity.class)));
+        btnImport.setOnClickListener(v -> {
+            if (!checkAndRequestPermissions(PERMISSION_REQUEST_IMPORT)) importSettings();
         });
-    }
-
-    private void applyPlexServerUrl(EditTextPreference serverUrlPref, String value)
-    {
-        serverUrlPref.setText(value);
-        serverUrlPref.setSummary(value.isEmpty() ? getString(R.string.plex_server_url_summary) : value);
-    }
-
-    private void setSkipBehaviorPreference()
-    {
-        ListPreference skipBehavior = settingsFragment.findPreference("skip_behavior");
-        if (skipBehavior == null) return;
-
-        skipBehavior.setSummaryProvider(preference ->
-        {
-            CharSequence entry = ((ListPreference) preference).getEntry();
-            return entry != null ? entry : getString(R.string.skip_behavior_summary);
+        btnExport.setOnClickListener(v -> {
+            if (!checkAndRequestPermissions(PERMISSION_REQUEST_EXPORT)) exportSettings();
         });
+        btnTest.setOnClickListener(v -> testConnection());
     }
 
-    private void setOverlayPermissionPreference()
-    {
-        Preference overlayPref = settingsFragment.findPreference("overlay_permission");
-        if (overlayPref == null) return;
-
-        boolean allowed = SkipOverlay.canDrawOverlays(getApplicationContext());
-        overlayPref.setSummary(allowed
-                ? "Granted — Skip button can appear over Zidoo"
-                : getString(R.string.overlay_permission_summary));
-
-        overlayPref.setOnPreferenceClickListener(preference ->
-        {
-            try
-            {
+    private void wireOverlayStatus() {
+        overlayStatus.setOnClickListener(v -> {
+            try {
                 Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:" + getPackageName()));
                 startActivity(intent);
-            }
-            catch (Exception e)
-            {
-                Toast.makeText(getApplicationContext(),
+            } catch (Exception e) {
+                Toast.makeText(this,
                         "Open Settings → Apps → Special access → Display over other apps",
                         Toast.LENGTH_LONG).show();
             }
-            return true;
         });
+        refreshOverlayStatus();
     }
 
-    private void setTestConnectionPreference()
-    {
-        Preference testPref = settingsFragment.findPreference("plex_test_connection");
-        if (testPref == null) return;
-
-        testPref.setOnPreferenceClickListener(preference ->
-        {
-            Context context = settingsFragment.requireContext();
-            SharedPreferences defaultPrefs = PreferenceManager.getDefaultSharedPreferences(context);
-            SharedPreferences securePrefs = SecureStorage.getInstance(context);
-            String serverUrl = defaultPrefs.getString("plex_server_url", "");
-            String token = securePrefs.getString("plex_access_token", "");
-
-            if (serverUrl == null || serverUrl.isEmpty())
-            {
-                Toast.makeText(context, "Please configure a fallback Server URL first", Toast.LENGTH_LONG).show();
-                return true;
-            }
-            if (token == null || token.isEmpty())
-            {
-                Toast.makeText(context, "Please configure a fallback X-Plex-Token first", Toast.LENGTH_LONG).show();
-                return true;
-            }
-
-            testPref.setSummary("Testing...");
-            PlexApi.testConnection(serverUrl, token, new PlexApi.SimpleCallback()
-            {
-                @Override
-                public void onSuccess(String message)
-                {
-                    Toast.makeText(context, message, Toast.LENGTH_LONG).show();
-                    testPref.setSummary(message);
-                }
-
-                @Override
-                public void onError(String error)
-                {
-                    Toast.makeText(context, "Connection failed: " + error, Toast.LENGTH_LONG).show();
-                    testPref.setSummary("Test connection failed");
-                }
-            });
-
-            return true;
-        });
+    private void refreshOverlayStatus() {
+        boolean allowed = SkipOverlay.canDrawOverlays(getApplicationContext());
+        overlayStatus.setText(allowed
+                ? R.string.overlay_permission_granted
+                : R.string.overlay_permission_denied);
     }
 
-    private void setScreensaverPreferences()
-    {
-        ListPreference interval = settingsFragment.findPreference("screensaver_interval_sec");
-        if (interval != null)
-        {
-            interval.setSummaryProvider(preference ->
-            {
-                CharSequence entry = ((ListPreference) preference).getEntry();
-                return entry != null ? entry : getString(R.string.screensaver_interval_summary);
-            });
-        }
-
-        ListPreference logoSize = settingsFragment.findPreference("screensaver_logo_size");
-        if (logoSize != null)
-        {
-            logoSize.setSummaryProvider(preference ->
-            {
-                CharSequence entry = ((ListPreference) preference).getEntry();
-                return entry != null ? entry : getString(R.string.screensaver_logo_size_summary);
-            });
-        }
-
-        Preference preview = settingsFragment.findPreference("screensaver_preview");
-        if (preview != null)
-        {
-            preview.setOnPreferenceClickListener(preference ->
-            {
-                startActivity(new Intent(this, ScreensaverPreviewActivity.class));
-                return true;
-            });
-        }
-    }
-
-    public void setSmbPasswordPreference()
-    {
-        Context context = settingsFragment.requireContext();
-        for (String s : SecureStorage.SMB_PASSWORD_SUFFIXES)
-        {
-            EditTextPreference smbPasswordPreference = settingsFragment.findPreference("smbPassword" + s);
-            if (smbPasswordPreference == null)
-            {
-                continue;
-            }
-
-            // Non-persistent: value lives in SecureStorage (with plaintext dual-read fallback).
-            String existing = SecureStorage.getSmbPassword(context, s);
-            smbPasswordPreference.setSummary(
-                    (existing != null && !existing.isEmpty()) ? "********" : "Not set");
-
-            smbPasswordPreference.setOnBindEditTextListener(editText ->
-                    editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD));
-
-            final String suffix = s;
-            smbPasswordPreference.setOnPreferenceChangeListener((preference, newValue) ->
-            {
-                String value = (newValue != null) ? newValue.toString() : "";
-                SecureStorage.putSmbPassword(context, suffix, value);
-                smbPasswordPreference.setSummary(value.isEmpty() ? "Not set" : "********");
-                return false;
-            });
-        }
-    }
-
-    public void onSubstitutionBackClickMethod(View view)
-    {
-        showRootSettings("substitution_link");
-    }
-
-    public void onImportClickMethod(View view)
-    {
-        if (checkAndRequestPermissions(PERMISSION_REQUEST_IMPORT))
-        {
+    private void testConnection() {
+        String serverUrl = prefs.getString("plex_server_url", "");
+        String token = securePrefs.getString("plex_access_token", "");
+        if (serverUrl == null || serverUrl.isEmpty()) {
+            Toast.makeText(this, "Please configure a Server URL first", Toast.LENGTH_LONG).show();
             return;
         }
+        if (token == null || token.isEmpty()) {
+            Toast.makeText(this, "Please configure a Plex token first", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Toast.makeText(this, "Testing…", Toast.LENGTH_SHORT).show();
+        PlexApi.testConnection(serverUrl, token, new PlexApi.SimpleCallback() {
+            @Override
+            public void onSuccess(String message) {
+                Toast.makeText(SettingsActivity.this, message, Toast.LENGTH_LONG).show();
+            }
 
-        importSettings();
+            @Override
+            public void onError(String error) {
+                Toast.makeText(SettingsActivity.this, "Connection failed: " + error, Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
-    public void importSettings()
-    {
+    private void ensureFocusScroll() {
+        View root = findViewById(android.R.id.content);
+        root.getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
+            if (newFocus != null && settingsScroll != null) {
+                settingsScroll.post(() -> scrollToView(newFocus));
+            }
+        });
+    }
+
+    private void scrollToView(View focus) {
+        if (settingsScroll == null || focus == null) return;
+        int[] loc = new int[2];
+        int[] scrollLoc = new int[2];
+        focus.getLocationOnScreen(loc);
+        settingsScroll.getLocationOnScreen(scrollLoc);
+        int relativeTop = loc[1] - scrollLoc[1];
+        int relativeBottom = relativeTop + focus.getHeight();
+        int visible = settingsScroll.getHeight();
+        if (relativeTop < 0) {
+            settingsScroll.smoothScrollBy(0, relativeTop - 24);
+        } else if (relativeBottom > visible) {
+            settingsScroll.smoothScrollBy(0, relativeBottom - visible + 24);
+        }
+    }
+
+    // --- Import / export (format compatible with prior PreferenceFragment builds) ---
+
+    public void importSettings() {
         FileInputStream input = null;
         BufferedReader reader = null;
-        try
-        {
+        try {
             input = new FileInputStream(backupFile);
             reader = new BufferedReader(new InputStreamReader(input));
-
             Gson gson = new Gson();
-            Type mapType = new TypeToken<Map<String, ?>>(){}.getType();
+            Type mapType = new TypeToken<Map<String, ?>>() {}.getType();
             Map<String, ?> map = gson.fromJson(reader, mapType);
 
-            for (Map.Entry<String, ?> entry : map.entrySet())
-            {
-                try
-                {
-                    setPreferenceOnImport(entry);
+            Map<String, String> secureOut = new HashMap<>();
+            Map<String, Object> prefsOut = new HashMap<>();
+            applyImportMap(map, secureOut, prefsOut);
+
+            SharedPreferences.Editor secureEd = securePrefs.edit();
+            for (Map.Entry<String, String> e : secureOut.entrySet()) {
+                secureEd.putString(e.getKey(), e.getValue());
+            }
+            secureEd.apply();
+
+            SharedPreferences.Editor prefEd = prefs.edit();
+            for (Map.Entry<String, Object> e : prefsOut.entrySet()) {
+                Object v = e.getValue();
+                if (v instanceof Boolean) {
+                    prefEd.putBoolean(e.getKey(), (Boolean) v);
+                } else if (v == null) {
+                    prefEd.remove(e.getKey());
+                } else {
+                    prefEd.putString(e.getKey(), v.toString());
                 }
-                catch (Exception e)
-                {
-                    // Ignore bad data
+            }
+            prefEd.apply();
+
+            // SMB passwords keyed by plaintext suffix form in export
+            for (Map.Entry<String, ?> entry : map.entrySet()) {
+                ImportAction action = classifyImportEntry(entry.getKey(), entry.getValue());
+                if (action.kind == ImportAction.Kind.SECURE_SMB_PASSWORD) {
+                    String key = entry.getKey();
+                    String suffix = key.substring("smbPassword".length());
+                    SecureStorage.putSmbPassword(getApplicationContext(), suffix,
+                            action.stringValue != null ? action.stringValue : "");
                 }
             }
 
-            settingsFragment.setPreferencesFromResource(R.xml.substitution_preferences, settingsRootKey);
-            for (Map.Entry<String, ?> entry : map.entrySet())
-            {
-                try
-                {
-                    setPreferenceOnImport(entry);
-                }
-                catch (Exception e)
-                {
-                    // Ignore bad data
-                }
-            }
-
-            showRootSettings("import_export");
-            Toast.makeText(getApplicationContext(), "Settings imported successfully from " + backupFile, Toast.LENGTH_LONG).show();
-        }
-        catch (Exception e)
-        {
-            Toast.makeText(getApplicationContext(), "Failed to import settings from " + backupFile, Toast.LENGTH_LONG).show();
-        }
-        finally
-        {
-            try
-            {
-                if (reader != null)
-                {
-                    reader.close();
-                }
-                if (input != null)
-                {
-                    input.close();
-                }
-            }
-            catch (IOException ex)
-            {
-                Toast.makeText(getApplicationContext(), "Failed to close import file", Toast.LENGTH_LONG).show();
+            loadFromPrefs();
+            wireSegments();
+            Toast.makeText(this, "Settings imported successfully from " + backupFile, Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Failed to import settings from " + backupFile, Toast.LENGTH_LONG).show();
+        } finally {
+            try {
+                if (reader != null) reader.close();
+                if (input != null) input.close();
+            } catch (IOException ex) {
+                Toast.makeText(this, "Failed to close import file", Toast.LENGTH_LONG).show();
             }
         }
     }
 
-    /**
-     * Pure classification of one export-file entry for import.
-     * Matches v2026.11.2 {@code PlezyPlexToZidooSettings.txt} keys (and current).
-     */
     static final class ImportAction {
         enum Kind { SECURE_PLEX_TOKEN, SECURE_SMB_PASSWORD, PREF_STRING, PREF_BOOLEAN, SKIP }
 
@@ -469,10 +512,6 @@ public class SettingsActivity extends AppCompatActivity
         }
     }
 
-    /**
-     * Maps a single JSON export entry to the storage destination used on import.
-     * Fake credentials only in tests — never log values.
-     */
     static ImportAction classifyImportEntry(String key, Object rawValue) {
         if (key == null) {
             return new ImportAction(ImportAction.Kind.SKIP, null, null, false);
@@ -487,10 +526,8 @@ public class SettingsActivity extends AppCompatActivity
             return new ImportAction(ImportAction.Kind.SECURE_SMB_PASSWORD,
                     SecureStorage.smbSecureKey(suffix), asString, false);
         }
-        // Boolean switches (skip_intros, etc.) — string prefs (URLs, paths, usernames, intervals).
         if (rawValue instanceof Boolean) {
-            return new ImportAction(ImportAction.Kind.PREF_BOOLEAN, key, null,
-                    (Boolean) rawValue);
+            return new ImportAction(ImportAction.Kind.PREF_BOOLEAN, key, null, (Boolean) rawValue);
         }
         if ("true".equalsIgnoreCase(asString) || "false".equalsIgnoreCase(asString)) {
             return new ImportAction(ImportAction.Kind.PREF_BOOLEAN, key, null,
@@ -500,16 +537,10 @@ public class SettingsActivity extends AppCompatActivity
                 asString.isEmpty() ? null : asString, false);
     }
 
-    /**
-     * Applies a full export map into destination maps (no Android UI). Used by unit tests
-     * and keeps import key routing consistent with {@link #setPreferenceOnImport}.
-     */
     static void applyImportMap(Map<String, ?> exportMap,
                                Map<String, String> secureOut,
                                Map<String, Object> prefsOut) {
-        if (exportMap == null) {
-            return;
-        }
+        if (exportMap == null) return;
         for (Map.Entry<String, ?> entry : exportMap.entrySet()) {
             ImportAction action = classifyImportEntry(entry.getKey(), entry.getValue());
             switch (action.kind) {
@@ -530,129 +561,41 @@ public class SettingsActivity extends AppCompatActivity
         }
     }
 
-    public void setPreferenceOnImport(Map.Entry<String, ?> entry)
-    {
-        ImportAction action = classifyImportEntry(entry.getKey(), entry.getValue());
-        switch (action.kind) {
-            case SECURE_PLEX_TOKEN: {
-                SecureStorage.getInstance(getApplicationContext()).edit()
-                        .putString("plex_access_token", action.stringValue).apply();
-                EditTextPreference tokenPref = settingsFragment.findPreference("plex_token");
-                if (tokenPref != null) {
-                    String v = action.stringValue != null ? action.stringValue : "";
-                    tokenPref.setSummary(v.isEmpty() ? "Not set (optional fallback)" : "********");
-                }
-                return;
-            }
-            case SECURE_SMB_PASSWORD: {
-                String key = entry.getKey();
-                String suffix = key.substring("smbPassword".length());
-                SecureStorage.putSmbPassword(getApplicationContext(), suffix,
-                        action.stringValue != null ? action.stringValue : "");
-                EditTextPreference smbPref = settingsFragment.findPreference(key);
-                if (smbPref != null) {
-                    String v = action.stringValue != null ? action.stringValue : "";
-                    smbPref.setSummary(v.isEmpty() ? "Not set" : "********");
-                }
-                return;
-            }
-            case SKIP:
-                return;
-            default:
-                break;
-        }
-
-        Preference pref = settingsFragment.findPreference(entry.getKey());
-        if(pref instanceof EditTextPreference)
-        {
-            if(entry.getValue() == null || entry.getValue().toString().isEmpty())
-            {
-                ((EditTextPreference)pref).setText(null);
-            }
-            else
-            {
-                ((EditTextPreference)pref).setText(entry.getValue().toString());
-            }
-        }
-        else if(pref instanceof SwitchPreference)
-        {
-            if(entry.getValue() == null || entry.getValue().toString().isEmpty())
-            {
-                ((SwitchPreference)pref).setChecked(false);
-            }
-            else
-            {
-                ((SwitchPreference)pref).setChecked(Boolean.parseBoolean(entry.getValue().toString()));
-            }
-        }
-    }
-
-    public void onExportClickMethod(View view)
-    {
-        if (checkAndRequestPermissions(PERMISSION_REQUEST_EXPORT))
-        {
-            return;
-        }
-
-        exportSettings();
-    }
-
-    static boolean isPasswordKey(String key)
-    {
+    static boolean isPasswordKey(String key) {
         return key != null && ("plex_token".equals(key) || "plex_access_token".equals(key)
                 || key.startsWith("smbPassword"));
     }
 
-    static String buildExportJson(Map<String, ?> prefsMap, boolean includePasswords)
-    {
+    static String buildExportJson(Map<String, ?> prefsMap, boolean includePasswords) {
         LinkedHashMap<String, Object> filtered = new LinkedHashMap<>();
-        for (Map.Entry<String, ?> entry : prefsMap.entrySet())
-        {
+        for (Map.Entry<String, ?> entry : prefsMap.entrySet()) {
             String key = entry.getKey();
-            if ("plex_access_token".equals(key))
-            {
-                continue;
-            }
-            if (!includePasswords && isPasswordKey(key))
-            {
-                continue;
-            }
+            if ("plex_access_token".equals(key)) continue;
+            if (!includePasswords && isPasswordKey(key)) continue;
             filtered.put(key, entry.getValue());
         }
-
-        Gson gson = new GsonBuilder().setPrettyPrinting().create();
-        return gson.toJson(filtered);
+        return new GsonBuilder().setPrettyPrinting().create().toJson(filtered);
     }
 
-    public void exportSettings()
-    {
+    public void exportSettings() {
         FileOutputStream output = null;
-        try
-        {
+        try {
             output = new FileOutputStream(backupFile);
-
-            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(getApplicationContext());
-            Map<String,Object> prefsMap = prefs.getAll().entrySet()
-                                                   .stream()
-                                                   .sorted(Map.Entry.comparingByKey())
-                                                   .collect(Collectors.toMap(Map.Entry::getKey,
-                                                                             e -> (Object) e.getValue(),
-                                                                             (oldValue, newValue) -> oldValue, LinkedHashMap::new));
+            Map<String, Object> prefsMap = prefs.getAll().entrySet().stream()
+                    .sorted(Map.Entry.comparingByKey())
+                    .collect(Collectors.toMap(Map.Entry::getKey,
+                            e -> (Object) e.getValue(),
+                            (a, b) -> a, LinkedHashMap::new));
 
             boolean includePasswords = prefs.getBoolean("export_include_passwords", false);
-
-            if(includePasswords)
-            {
-                String plexToken = SecureStorage.getInstance(getApplicationContext()).getString("plex_access_token", "");
-                if(plexToken != null && !plexToken.isEmpty())
-                {
+            if (includePasswords) {
+                String plexToken = securePrefs.getString("plex_access_token", "");
+                if (plexToken != null && !plexToken.isEmpty()) {
                     prefsMap.put("plex_token", plexToken);
                 }
-                for (String suffix : SecureStorage.SMB_PASSWORD_SUFFIXES)
-                {
+                for (String suffix : SecureStorage.SMB_PASSWORD_SUFFIXES) {
                     String smb = SecureStorage.getSmbPassword(getApplicationContext(), suffix);
-                    if (smb != null && !smb.isEmpty())
-                    {
+                    if (smb != null && !smb.isEmpty()) {
                         prefsMap.put(SecureStorage.smbPlaintextKey(suffix), smb);
                     }
                 }
@@ -660,68 +603,61 @@ public class SettingsActivity extends AppCompatActivity
 
             String json = buildExportJson(prefsMap, includePasswords);
             output.write(json.getBytes(StandardCharsets.UTF_8));
-
-            String exportedMessage = includePasswords
+            String msg = includePasswords
                     ? "Settings and passwords exported to " + backupFile
                     : "Settings exported to " + backupFile + " (passwords excluded)";
-            Toast.makeText(getApplicationContext(), exportedMessage, Toast.LENGTH_LONG).show();
-        }
-        catch (Exception e)
-        {
-            Toast.makeText(getApplicationContext(), e.toString(), Toast.LENGTH_LONG).show();
-        }
-        finally
-        {
-            try
-            {
-                if (output != null)
-                {
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(this, e.toString(), Toast.LENGTH_LONG).show();
+        } finally {
+            try {
+                if (output != null) {
                     output.flush();
                     output.close();
                 }
-            }
-            catch (IOException ex)
-            {
-                Toast.makeText(getApplicationContext(), "Failed to close export file", Toast.LENGTH_LONG).show();
+            } catch (IOException ex) {
+                Toast.makeText(this, "Failed to close export file", Toast.LENGTH_LONG).show();
             }
         }
     }
 
-    public Boolean checkAndRequestPermissions(int requestCode)
-    {
-        if(checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED)
-        {
+    public Boolean checkAndRequestPermissions(int requestCode) {
+        if (checkSelfPermission(Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+                || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(permissions, requestCode);
             return true;
         }
-
         return false;
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults)
-    {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
-        if(requestCode == PERMISSION_REQUEST_IMPORT || requestCode == PERMISSION_REQUEST_EXPORT)
-        {
-            if(grantResults.length >= 2
+        if (requestCode == PERMISSION_REQUEST_IMPORT || requestCode == PERMISSION_REQUEST_EXPORT) {
+            if (grantResults.length >= 2
                     && grantResults[0] == PackageManager.PERMISSION_GRANTED
-                    && grantResults[1] == PackageManager.PERMISSION_GRANTED)
-            {
-                if(requestCode == PERMISSION_REQUEST_IMPORT)
-                {
-                    importSettings();
-                }
-                else
-                {
-                    exportSettings();
-                }
-            }
-            else
-            {
-                Toast.makeText(getApplicationContext(), "Please give storage access in order to import/export settings", Toast.LENGTH_LONG).show();
+                    && grantResults[1] == PackageManager.PERMISSION_GRANTED) {
+                if (requestCode == PERMISSION_REQUEST_IMPORT) importSettings();
+                else exportSettings();
+            } else {
+                Toast.makeText(this, "Please give storage access in order to import/export settings",
+                        Toast.LENGTH_LONG).show();
             }
         }
+    }
+
+    /** Kept for XML onClick from legacy import_export layout if inflated elsewhere. */
+    public void onImportClickMethod(View view) {
+        if (!checkAndRequestPermissions(PERMISSION_REQUEST_IMPORT)) importSettings();
+    }
+
+    public void onExportClickMethod(View view) {
+        if (!checkAndRequestPermissions(PERMISSION_REQUEST_EXPORT)) exportSettings();
+    }
+
+    public void onSubstitutionBackClickMethod(View view) {
+        // No-op on dashboard; SubstitutionRulesActivity handles Back.
+        finish();
     }
 }

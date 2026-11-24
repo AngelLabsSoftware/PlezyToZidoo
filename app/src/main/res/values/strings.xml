@@ -62,6 +62,8 @@
     <string name="substitution_rule_2_title">Path Substitution Rule 2 (optional)</string>
     <string name="substitution_link_more">Manage additional rules</string>
     <string name="manage_rules_title">Additional path rules</string>
+    <string name="manage_rules_subtitle">Rules 2–10 · values edit in place · passwords masked</string>
+    <string name="rule_card_title">Rule %1$d</string>
 
     <!-- Import/Export -->
     <string name="import_export_description">Backup file: Downloads/PlezyPlexToZidooSettings.txt. Tokens and SMB passwords are omitted unless Include passwords is on.</string>

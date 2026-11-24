@@ -12,6 +12,7 @@ import android.provider.Settings;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -150,6 +151,14 @@ public class SettingsActivity extends AppCompatActivity {
         View row = findViewById(includeId);
         TextView label = row.findViewById(R.id.toggleLabel);
         label.setText(labelRes);
+        SwitchCompat sw = row.findViewById(R.id.toggleSwitch);
+        // Whole row is focusable; OK / click toggles the switch (sofa-readable focus).
+        // Rely on OnClickListener only — DPAD_CENTER synthesizes a click (avoid double toggle).
+        row.setOnClickListener(v -> {
+            if (sw.isEnabled()) {
+                sw.toggle();
+            }
+        });
     }
 
     private SwitchCompat switchOf(int includeId) {
@@ -192,9 +201,24 @@ public class SettingsActivity extends AppCompatActivity {
         swShowTitle.setEnabled(on);
         swSkipIntros.setEnabled(on);
         swSkipCredits.setEnabled(on);
+        findViewById(R.id.rowShowTitle).setEnabled(on);
+        findViewById(R.id.rowSkipIntros).setEnabled(on);
+        findViewById(R.id.rowSkipCredits).setEnabled(on);
+        findViewById(R.id.rowShowTitle).setFocusable(on);
+        findViewById(R.id.rowSkipIntros).setFocusable(on);
+        findViewById(R.id.rowSkipCredits).setFocusable(on);
         findViewById(R.id.segSkipBehavior).setEnabled(on);
+        setSegmentChildrenFocusable(findViewById(R.id.segSkipBehavior), on);
         overlayStatus.setEnabled(on);
+        overlayStatus.setFocusable(on);
         overlayStatus.setAlpha(on ? 1f : 0.45f);
+    }
+
+    private void setSegmentChildrenFocusable(ViewGroup group, boolean focusable) {
+        if (group == null) return;
+        for (int i = 0; i < group.getChildCount(); i++) {
+            group.getChildAt(i).setFocusable(focusable);
+        }
     }
 
     private void wireSwitches() {
@@ -318,7 +342,7 @@ public class SettingsActivity extends AppCompatActivity {
         final String suggested = PlexApi.suggestAppendDefaultPlexPort(value);
         if (suggested == null || suggested.equals(value)) return;
         final String current = value;
-        new AlertDialog.Builder(this)
+        new AlertDialog.Builder(this, R.style.Theme_Plezy_AlertDialog)
                 .setTitle(R.string.plex_server_url_port_title)
                 .setMessage(getString(R.string.plex_server_url_port_message, suggested))
                 .setPositiveButton(R.string.plex_server_url_port_yes, (d, w) -> {

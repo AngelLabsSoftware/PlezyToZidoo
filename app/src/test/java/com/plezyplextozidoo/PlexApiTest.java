@@ -46,6 +46,9 @@ public class PlexApiTest {
             assertEquals(90000, result.introEndMs);
             assertEquals(3300000, result.creditStartMs);
             assertEquals(3600000, result.creditEndMs);
+            assertEquals(1, result.creditSegments.size());
+            assertEquals(3300000, result.creditSegments.get(0).startMs);
+            assertEquals(3600000, result.creditSegments.get(0).endMs);
             assertEquals("1", result.seriesRatingKey);
             assertEquals("2", result.seasonRatingKey);
             assertEquals(3, result.episodeNumber);

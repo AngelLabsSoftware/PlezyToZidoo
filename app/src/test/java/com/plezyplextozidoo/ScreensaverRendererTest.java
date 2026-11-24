@@ -77,4 +77,23 @@ public class ScreensaverRendererTest {
         assertEquals(1920, size[0]);
         assertEquals(480, size[1]);
     }
+
+    @Test
+    public void candidateEligible_requiresLogoUnlessTextFallback() {
+        PlexApi.ScreensaverItem withLogo = new PlexApi.ScreensaverItem(
+                "1", "Film", "/art/1", "/logo/1", "1999", "movie");
+        PlexApi.ScreensaverItem noLogo = new PlexApi.ScreensaverItem(
+                "2", "Series", "/art/2", "", "2005", "show");
+        PlexApi.ScreensaverItem noArt = new PlexApi.ScreensaverItem(
+                "3", "Bare", "", "/logo/3", "2001", "movie");
+        PlexApi.ScreensaverItem blankTitle = new PlexApi.ScreensaverItem(
+                "4", "  ", "/art/4", "", "2001", "movie");
+
+        assertTrue(ScreensaverRenderer.isScreensaverCandidateEligible(withLogo, false));
+        assertFalse(ScreensaverRenderer.isScreensaverCandidateEligible(noLogo, false));
+        assertTrue(ScreensaverRenderer.isScreensaverCandidateEligible(noLogo, true));
+        assertFalse(ScreensaverRenderer.isScreensaverCandidateEligible(noArt, true));
+        assertFalse(ScreensaverRenderer.isScreensaverCandidateEligible(blankTitle, true));
+        assertFalse(ScreensaverRenderer.isScreensaverCandidateEligible(null, true));
+    }
 }

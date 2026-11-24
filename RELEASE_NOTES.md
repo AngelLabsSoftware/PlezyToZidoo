@@ -1,5 +1,12 @@
 # Release notes
 
+## 2026.11.8 — Credits segment skip + screensaver logo gate
+
+- **Credits:** Skip Credits seeks past the **current** Plex credits/outro segment only (all markers retained). Manual / Countdown / Instant share that destination for films and TV. Instant no longer binge-closes at earliest credits start.
+- **Up Next:** Only after true media end (credits seek at/near duration, or natural ≥90% watched). Mid/post-credit scenes preserved; Back cancels the current segment only.
+- **Screensaver:** Default requires usable transparent clearLogo (preload+decode before transition). New **Allow text title fallback** (off by default) for understated white text titles. Keeps 11.7 Ken Burns (~1.05) and Small/Original logo size.
+- Version `2026.11.8` / `versionCode` `20261129`.
+
 ## 2026.11.6 — Screensaver polish
 
 - Includes 11.4/11.5 screensaver sections HTML/auth fixes (from open PR #8; not force-merged).

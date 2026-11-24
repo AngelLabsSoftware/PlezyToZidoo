@@ -1,11 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Entire row is the focus target so D-pad highlight is sofa-readable. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:background="@drawable/dash_row_focus"
+    android:clickable="true"
+    android:clipToPadding="false"
+    android:descendantFocusability="blocksDescendants"
+    android:focusable="true"
     android:gravity="center_vertical"
     android:orientation="horizontal"
+    android:paddingStart="8dp"
     android:paddingTop="8dp"
-    android:paddingBottom="4dp">
+    android:paddingEnd="8dp"
+    android:paddingBottom="8dp">
 
     <TextView
         android:id="@+id/toggleLabel"
@@ -13,13 +21,16 @@
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
+        android:duplicateParentState="true"
         android:paddingEnd="12dp" />
 
     <androidx.appcompat.widget.SwitchCompat
         android:id="@+id/toggleSwitch"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:focusable="true"
+        android:clickable="false"
+        android:duplicateParentState="true"
+        android:focusable="false"
         android:thumb="@drawable/switch_thumb_mono"
         android:track="@drawable/switch_track_mono" />
 </LinearLayout>

@@ -20,15 +20,21 @@
     <!-- Settings dashboard -->
     <color name="dash_bg">#FF1A1A1A</color>
     <color name="dash_panel">#FF2A2A2A</color>
+    <color name="dash_panel_alt">#FF323232</color>
     <color name="dash_panel_border">#FF3A3A3A</color>
     <color name="dash_text_primary">#FFFFFFFF</color>
     <color name="dash_text_secondary">#FF9E9E9E</color>
     <color name="dash_input_bg">#FF1F1F1F</color>
+    <color name="dash_input_bg_focused">#FF2E2E2E</color>
     <color name="dash_segment_bg">#FF222222</color>
+    <color name="dash_segment_focused_bg">#FF5A5A5A</color>
     <color name="dash_segment_selected_bg">#FFFFFFFF</color>
     <color name="dash_segment_selected_text">#FF111111</color>
     <color name="dash_focus_stroke">#FFFFFFFF</color>
+    <color name="dash_focus_gap">#FF1A1A1A</color>
+    <color name="dash_row_focused">#FF3D3D3D</color>
     <color name="dash_switch_track_off">#FF555555</color>
     <color name="dash_switch_track_on">#FFBDBDBD</color>
     <color name="dash_switch_thumb">#FFFFFFFF</color>
+    <color name="transparent">#00000000</color>
 </resources>

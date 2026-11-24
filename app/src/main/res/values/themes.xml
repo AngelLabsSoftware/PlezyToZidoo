@@ -68,4 +68,14 @@
         <item name="android:textColor">@color/dash_text_secondary</item>
         <item name="android:textSize">12sp</item>
     </style>
+
+    <style name="Theme.Plezy.AlertDialog" parent="Theme.AppCompat.Dialog.Alert">
+        <item name="android:background">@color/dash_panel</item>
+        <item name="android:windowBackground">@color/dash_panel</item>
+        <item name="android:textColorPrimary">@color/dash_text_primary</item>
+        <item name="android:textColorSecondary">@color/dash_text_secondary</item>
+        <item name="colorAccent">@color/white</item>
+        <item name="buttonBarPositiveButtonStyle">@style/Widget.Plezy.MonoButton</item>
+        <item name="buttonBarNegativeButtonStyle">@style/Widget.Plezy.MonoButton</item>
+    </style>
 </resources>

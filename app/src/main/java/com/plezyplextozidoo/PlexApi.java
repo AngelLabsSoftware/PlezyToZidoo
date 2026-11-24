@@ -9,7 +9,14 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.Node;
+import org.w3c.dom.NodeList;
+import org.xml.sax.InputSource;
+
 import java.io.IOException;
+import java.io.StringReader;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +29,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
 
 import okhttp3.Call;
 import okhttp3.HttpUrl;
@@ -167,6 +177,17 @@ public class PlexApi {
         }
     }
 
+    /** One library section from {@code /library/sections} (JSON or XML). */
+    public static class LibrarySection {
+        public final String key;
+        public final String type;
+
+        public LibrarySection(String key, String type) {
+            this.key = key != null ? key : "";
+            this.type = type != null ? type : "";
+        }
+    }
+
     /** Genuine 4K artwork thresholds (never treat upscaled images as 4K). */
     public static final int GENUINE_4K_MIN_WIDTH = 3840;
     public static final int GENUINE_4K_MIN_HEIGHT = 2160;
@@ -188,6 +209,22 @@ public class PlexApi {
         }
     }
 
+    /**
+     * One valid Plex credits/outro marker. All valid segments are retained;
+     * Skip Credits targets the current segment's end (preserves mid/post-credit scenes).
+     */
+    public static class CreditSegment {
+        public final long startMs;
+        public final long endMs;
+        public final boolean isFinal;
+
+        public CreditSegment(long startMs, long endMs, boolean isFinal) {
+            this.startMs = startMs;
+            this.endMs = endMs;
+            this.isFinal = isFinal;
+        }
+    }
+
     public static class MetadataResult {
         public final String ratingKey;
         public final String filePath;
@@ -202,8 +239,12 @@ public class PlexApi {
         public final boolean isEpisode;
         public final long introStartMs;
         public final long introEndMs;
+        /** Earliest credits segment start, or -1 when none. */
         public final long creditStartMs;
+        /** Earliest credits segment end, or -1 when none. */
         public final long creditEndMs;
+        /** All valid credits/outro segments, sorted by start ascending. Never null. */
+        public final List<CreditSegment> creditSegments;
         public final String thumb;
         public final String art;
         public final String metadataKey;
@@ -214,6 +255,19 @@ public class PlexApi {
                               boolean isEpisode, long introStartMs, long introEndMs,
                               long creditStartMs, long creditEndMs, String thumb, String art,
                               String metadataKey) {
+            this(ratingKey, filePath, viewOffsetMs, durationMs, title, seriesTitle,
+                    seriesRatingKey, seasonRatingKey, seasonNumber, episodeNumber, isEpisode,
+                    introStartMs, introEndMs, creditStartMs, creditEndMs,
+                    Collections.emptyList(), thumb, art, metadataKey);
+        }
+
+        public MetadataResult(String ratingKey, String filePath, long viewOffsetMs, long durationMs,
+                              String title, String seriesTitle, String seriesRatingKey,
+                              String seasonRatingKey, int seasonNumber, int episodeNumber,
+                              boolean isEpisode, long introStartMs, long introEndMs,
+                              long creditStartMs, long creditEndMs,
+                              List<CreditSegment> creditSegments,
+                              String thumb, String art, String metadataKey) {
             this.ratingKey = ratingKey;
             this.filePath = filePath;
             this.viewOffsetMs = viewOffsetMs;
@@ -229,6 +283,9 @@ public class PlexApi {
             this.introEndMs = introEndMs;
             this.creditStartMs = creditStartMs;
             this.creditEndMs = creditEndMs;
+            this.creditSegments = creditSegments != null
+                    ? Collections.unmodifiableList(new ArrayList<>(creditSegments))
+                    : Collections.emptyList();
             this.thumb = thumb;
             this.art = art;
             this.metadataKey = metadataKey;
@@ -240,13 +297,24 @@ public class PlexApi {
         public final long introEndMs;
         public final long creditStartMs;
         public final long creditEndMs;
+        /** All valid credits/outro segments, sorted by start ascending. Never null. */
+        public final List<CreditSegment> creditSegments;
 
         public MarkerResult(long introStartMs, long introEndMs,
                             long creditStartMs, long creditEndMs) {
+            this(introStartMs, introEndMs, creditStartMs, creditEndMs, Collections.emptyList());
+        }
+
+        public MarkerResult(long introStartMs, long introEndMs,
+                            long creditStartMs, long creditEndMs,
+                            List<CreditSegment> creditSegments) {
             this.introStartMs = introStartMs;
             this.introEndMs = introEndMs;
             this.creditStartMs = creditStartMs;
             this.creditEndMs = creditEndMs;
+            this.creditSegments = creditSegments != null
+                    ? Collections.unmodifiableList(new ArrayList<>(creditSegments))
+                    : Collections.emptyList();
         }
 
         long introStartMs() { return introStartMs; }
@@ -255,7 +323,8 @@ public class PlexApi {
         long creditEndMs() { return creditEndMs; }
     }
 
-    private static final MarkerResult EMPTY_MARKERS = new MarkerResult(-1, -1, -1, -1);
+    private static final MarkerResult EMPTY_MARKERS =
+            new MarkerResult(-1, -1, -1, -1, Collections.emptyList());
 
     // --- URI parsing ---
 
@@ -333,7 +402,125 @@ public class PlexApi {
     static String baseUrl(String serverUrl) {
         if (serverUrl == null) return "";
         String trimmed = serverUrl.trim();
-        return trimmed.endsWith("/") ? trimmed.substring(0, trimmed.length() - 1) : trimmed;
+        // Strip trailing slashes.
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        // Browser "Plex Web" paths are not the PMS API root; /web/... returns HTML.
+        if (trimmed.toLowerCase(Locale.ROOT).endsWith("/web/index.html")) {
+            trimmed = trimmed.substring(0, trimmed.length() - "/web/index.html".length());
+        } else if (trimmed.toLowerCase(Locale.ROOT).endsWith("/web")) {
+            trimmed = trimmed.substring(0, trimmed.length() - "/web".length());
+        }
+        while (trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
+        }
+        return trimmed;
+    }
+
+    /** Default Plex Media Server listen port (LAN). */
+    public static final int DEFAULT_PLEX_PORT = 32400;
+
+    /**
+     * When {@code serverUrl} is a bare LAN IP/host with no explicit port, returns the same
+     * URL with {@code :32400} after the host. Returns {@code null} when no suggestion should
+     * be offered (already has a port, non-LAN / reverse-proxy style URL, or unparseable).
+     * Settings must warn and offer — never silently rewrite custom ports or proxy URLs.
+     */
+    public static String suggestAppendDefaultPlexPort(String serverUrl) {
+        if (serverUrl == null) return null;
+        String trimmed = serverUrl.trim();
+        if (trimmed.isEmpty()) return null;
+
+        HttpUrl parsed = HttpUrl.parse(trimmed);
+        boolean addedScheme = false;
+        if (parsed == null) {
+            parsed = HttpUrl.parse("http://" + trimmed);
+            addedScheme = parsed != null;
+        }
+        if (parsed == null) return null;
+
+        String host = parsed.host();
+        if (host == null || host.isEmpty()) return null;
+        if (!isLanPlexHost(host)) return null;
+
+        // Explicit port in the typed URL — never rewrite custom ports.
+        String authoritySource = addedScheme ? trimmed : trimmed;
+        if (hasExplicitPort(authoritySource, host)) return null;
+
+        // Path beyond "/" usually means reverse proxy — never rewrite those.
+        String path = parsed.encodedPath();
+        if (path != null && path.length() > 1) return null;
+
+        HttpUrl suggested = parsed.newBuilder()
+                .port(DEFAULT_PLEX_PORT)
+                .encodedPath("/")
+                .query(null)
+                .fragment(null)
+                .build();
+        String out = suggested.toString();
+        while (out.endsWith("/")) {
+            out = out.substring(0, out.length() - 1);
+        }
+        return out;
+    }
+
+    /** True when the typed URL includes an explicit {@code :port} after the host. */
+    static boolean hasExplicitPort(String rawUrl, String host) {
+        if (rawUrl == null || host == null || host.isEmpty()) return false;
+        String lower = rawUrl.toLowerCase(Locale.ROOT);
+        String hostLower = host.toLowerCase(Locale.ROOT);
+        int hostAt = lower.indexOf('[' + hostLower + ']');
+        int hostLen;
+        if (hostAt >= 0) {
+            hostLen = hostLower.length() + 2; // brackets
+        } else {
+            hostAt = lower.indexOf(hostLower);
+            if (hostAt < 0) return false;
+            hostLen = hostLower.length();
+        }
+        int after = hostAt + hostLen;
+        return after < rawUrl.length() && rawUrl.charAt(after) == ':';
+    }
+
+    /**
+     * LAN-ish hosts where PMS commonly listens on :32400 without a reverse proxy.
+     * Public DNS names are treated as reverse-proxy candidates (no port suggestion).
+     */
+    static boolean isLanPlexHost(String host) {
+        if (host == null || host.isEmpty()) return false;
+        String h = host.toLowerCase(Locale.ROOT);
+        if (h.endsWith(".local") || h.endsWith(".lan") || h.endsWith(".home")) {
+            return true;
+        }
+        if (!h.contains(".") && !h.contains(":")) {
+            return true; // single-label LAN hostname
+        }
+        if (isPrivateIpv4(h)) return true;
+        // IPv6 unique-local / link-local (HttpUrl host is unbracketed).
+        if (h.startsWith("fd") || h.startsWith("fc") || h.startsWith("fe80:")) {
+            return true;
+        }
+        return false;
+    }
+
+    static boolean isPrivateIpv4(String host) {
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) return false;
+        try {
+            int[] oct = new int[4];
+            for (int i = 0; i < 4; i++) {
+                oct[i] = Integer.parseInt(parts[i]);
+                if (oct[i] < 0 || oct[i] > 255) return false;
+            }
+            if (oct[0] == 10) return true;
+            if (oct[0] == 127) return true;
+            if (oct[0] == 192 && oct[1] == 168) return true;
+            if (oct[0] == 172 && oct[1] >= 16 && oct[1] <= 31) return true;
+            return false;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     /**
@@ -358,6 +545,8 @@ public class PlexApi {
     /**
      * Parses Marker array from a Plex metadata JSON object (or MediaContainer wrapper).
      * Marker types: intro, credits (also accepts outro). Offsets are milliseconds.
+     * Retains <strong>all</strong> valid credits/outro markers (sorted by start); does not
+     * discard earlier segments when a {@code final} marker exists.
      */
     static MarkerResult parseMarkers(JsonObject metadataOrRoot) {
         try {
@@ -368,8 +557,9 @@ public class PlexApi {
                 return EMPTY_MARKERS;
             }
             JsonArray markers = meta.getAsJsonArray("Marker");
-            long introStart = -1, introEnd = -1, creditStart = -1, creditEnd = -1;
-            long introStartBest = Long.MAX_VALUE, creditStartBest = Long.MAX_VALUE;
+            long introStart = -1, introEnd = -1;
+            long introStartBest = Long.MAX_VALUE;
+            List<CreditSegment> creditSegments = new ArrayList<>();
 
             for (int i = 0; i < markers.size(); i++) {
                 JsonElement el = markers.get(i);
@@ -378,7 +568,8 @@ public class PlexApi {
                 String type = optString(m, "type").toLowerCase(Locale.ENGLISH);
                 long start = optLong(m, "startTimeOffset", -1);
                 long end = optLong(m, "endTimeOffset", -1);
-                if (start < 0 || end <= 0) continue;
+                // Valid range: start >= 0 and end > start. Invalid/ambiguous markers are skipped.
+                if (start < 0 || end <= start) continue;
 
                 if ("intro".equals(type)) {
                     if (start < introStartBest) {
@@ -387,17 +578,71 @@ public class PlexApi {
                         introEnd = end;
                     }
                 } else if ("credits".equals(type) || "outro".equals(type)) {
-                    if (start < creditStartBest) {
-                        creditStartBest = start;
-                        creditStart = start;
-                        creditEnd = end;
-                    }
+                    creditSegments.add(new CreditSegment(start, end, parseMarkerFinal(m)));
                 }
             }
-            return new MarkerResult(introStart, introEnd, creditStart, creditEnd);
+
+            creditSegments.sort((a, b) -> Long.compare(a.startMs, b.startMs));
+            long creditStart = -1, creditEnd = -1;
+            if (!creditSegments.isEmpty()) {
+                creditStart = creditSegments.get(0).startMs;
+                creditEnd = creditSegments.get(0).endMs;
+            }
+            return new MarkerResult(introStart, introEnd, creditStart, creditEnd, creditSegments);
         } catch (Exception e) {
             return EMPTY_MARKERS;
         }
+    }
+
+    /**
+     * Parses Plex Marker {@code final} (boolean, 0/1 number, or "true"/"1" string).
+     * Nested {@code Attributes.final} is also accepted when present.
+     */
+    static boolean parseMarkerFinal(JsonObject marker) {
+        if (marker == null) return false;
+        if (readFinalFlag(marker)) return true;
+        if (marker.has("Attributes") && marker.get("Attributes").isJsonObject()) {
+            return readFinalFlag(marker.getAsJsonObject("Attributes"));
+        }
+        return false;
+    }
+
+    private static boolean readFinalFlag(JsonObject object) {
+        if (object == null || !object.has("final") || object.get("final").isJsonNull()) {
+            return false;
+        }
+        JsonElement el = object.get("final");
+        if (!el.isJsonPrimitive()) return false;
+        try {
+            if (el.getAsJsonPrimitive().isBoolean()) {
+                return el.getAsBoolean();
+            }
+            if (el.getAsJsonPrimitive().isNumber()) {
+                return el.getAsInt() != 0;
+            }
+            String s = el.getAsString().trim().toLowerCase(Locale.ENGLISH);
+            return "1".equals(s) || "true".equals(s) || "yes".equals(s);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Safe one-line diagnostic of all credits markers (no tokens/paths). */
+    static String formatCreditSegmentsForLog(List<CreditSegment> segments) {
+        if (segments == null || segments.isEmpty()) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < segments.size(); i++) {
+            CreditSegment s = segments.get(i);
+            if (i > 0) sb.append(", ");
+            sb.append('{').append("start=").append(s.startMs)
+                    .append(", end=").append(s.endMs)
+                    .append(", final=").append(s.isFinal)
+                    .append('}');
+        }
+        sb.append(']');
+        return sb.toString();
     }
 
     static MarkerResult parseMarkersFromBody(String jsonBody) {
@@ -463,6 +708,7 @@ public class PlexApi {
                 seasonNumber, episodeNumber, isEpisode,
                 markers.introStartMs, markers.introEndMs,
                 markers.creditStartMs, markers.creditEndMs,
+                markers.creditSegments,
                 thumb, art, metadataKey
         );
     }
@@ -564,14 +810,154 @@ public class PlexApi {
     private static JsonArray getMetadataArray(JsonObject root) {
         if (root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()) {
             JsonObject mc = root.getAsJsonObject("MediaContainer");
-            if (mc.has("Metadata") && mc.get("Metadata").isJsonArray()) {
-                return mc.getAsJsonArray("Metadata");
+            JsonArray arr = memberAsArray(mc, "Metadata");
+            if (arr.size() > 0) return arr;
+        }
+        JsonArray top = memberAsArray(root, "Metadata");
+        return top.size() > 0 ? top : null;
+    }
+
+    /**
+     * Plex JSON often emits a bare object when a collection has exactly one entry.
+     * Never returns null.
+     */
+    static JsonArray memberAsArray(JsonObject parent, String name) {
+        if (parent == null || name == null || !parent.has(name) || parent.get(name).isJsonNull()) {
+            return new JsonArray();
+        }
+        JsonElement el = parent.get(name);
+        if (el.isJsonArray()) {
+            return el.getAsJsonArray();
+        }
+        if (el.isJsonObject()) {
+            JsonArray arr = new JsonArray();
+            arr.add(el);
+            return arr;
+        }
+        return new JsonArray();
+    }
+
+    /** Strips a leading UTF-8 BOM so sniffing/parsing see the real payload. */
+    static String stripBom(String body) {
+        if (body != null && !body.isEmpty() && body.charAt(0) == '\uFEFF') {
+            return body.substring(1);
+        }
+        return body;
+    }
+
+    /**
+     * Classifies a Plex HTTP body without logging contents.
+     * Values: empty | json | xml | html | other
+     */
+    static String classifyBodyKind(String body) {
+        String s = stripBom(body);
+        if (s == null) return "empty";
+        int i = 0;
+        while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++;
+        if (i >= s.length()) return "empty";
+        char c = s.charAt(i);
+        if (c == '{' || c == '[') return "json";
+        if (c == '<') {
+            // HTML gate / Plex Web — must not be fed to the PMS XML parser (11.4 failure mode).
+            String head = s.substring(i, Math.min(i + 64, s.length())).toLowerCase(Locale.ROOT);
+            if (head.startsWith("<!doctype html")
+                    || head.startsWith("<html")
+                    || head.startsWith("<head")
+                    || head.startsWith("<body")
+                    || head.contains("<html")) {
+                return "html";
             }
+            return "xml";
         }
-        if (root.has("Metadata") && root.get("Metadata").isJsonArray()) {
-            return root.getAsJsonArray("Metadata");
+        return "other";
+    }
+
+    /** True when the body looks like XML (PMS default when Accept: json is ignored). */
+    static boolean looksLikeXml(String body) {
+        return "xml".equals(classifyBodyKind(body));
+    }
+
+    /** True when the body is an HTML page (proxy gate, /web UI, etc.). */
+    static boolean looksLikeHtml(String body) {
+        return "html".equals(classifyBodyKind(body));
+    }
+
+    private static Document parseXmlDocument(String body) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(false);
+        try {
+            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+            factory.setFeature("http://xml.org/sax/features/external-general-entities", false);
+            factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false);
+            factory.setExpandEntityReferences(false);
+        } catch (Exception ignored) {
+            // Some Android DocumentBuilderFactory implementations omit these features.
         }
-        return null;
+        DocumentBuilder builder = factory.newDocumentBuilder();
+        return builder.parse(new InputSource(new StringReader(stripBom(body))));
+    }
+
+    /**
+     * Parses {@code /library/sections} as JSON or XML.
+     * Does not log the body (may contain library titles); never logs tokens.
+     * Rejects HTML explicitly — the 11.4 XML path mis-handled HTML as XML.
+     */
+    static List<LibrarySection> parseLibrarySections(String body) {
+        List<LibrarySection> out = new ArrayList<>();
+        String kind = classifyBodyKind(body);
+        if ("empty".equals(kind)) {
+            return out;
+        }
+        if ("html".equals(kind)) {
+            throw new IllegalArgumentException(
+                    "Plex returned HTML instead of library sections");
+        }
+        if ("xml".equals(kind)) {
+            return parseLibrarySectionsXml(stripBom(body));
+        }
+        if ("json".equals(kind)) {
+            return parseLibrarySectionsJson(stripBom(body));
+        }
+        throw new IllegalArgumentException("Unrecognized Plex sections payload (" + kind + ")");
+    }
+
+    private static List<LibrarySection> parseLibrarySectionsJson(String body) {
+        List<LibrarySection> out = new ArrayList<>();
+        JsonObject root = JsonParser.parseString(body).getAsJsonObject();
+        JsonObject mc = root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()
+                ? root.getAsJsonObject("MediaContainer") : root;
+        JsonArray dirs = memberAsArray(mc, "Directory");
+        for (int i = 0; i < dirs.size(); i++) {
+            JsonElement el = dirs.get(i);
+            if (el == null || !el.isJsonObject()) continue;
+            JsonObject dir = el.getAsJsonObject();
+            String key = optString(dir, "key");
+            if (key.isEmpty()) continue;
+            out.add(new LibrarySection(key, optString(dir, "type")));
+        }
+        return out;
+    }
+
+    private static List<LibrarySection> parseLibrarySectionsXml(String body) {
+        List<LibrarySection> out = new ArrayList<>();
+        try {
+            Document doc = parseXmlDocument(body);
+            NodeList dirs = doc.getElementsByTagName("Directory");
+            for (int i = 0; i < dirs.getLength(); i++) {
+                Node n = dirs.item(i);
+                if (n.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element el = (Element) n;
+                // Only top-level section directories (skip nested Location etc. without type/key).
+                String key = el.getAttribute("key");
+                if (key == null || key.isEmpty()) continue;
+                String type = el.getAttribute("type");
+                out.add(new LibrarySection(key, type != null ? type : ""));
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "parseLibrarySectionsXml: " + e.getClass().getSimpleName());
+            throw new IllegalArgumentException("Invalid Plex XML sections response");
+        }
+        return out;
     }
 
     // --- Path helpers (shared with Zidoo binge path) ---
@@ -644,9 +1030,38 @@ public class PlexApi {
 
     // --- HTTP helpers ---
 
+    /**
+     * Ensures {@code X-Plex-Token} is present as a query parameter.
+     * Playback / image URLs already use query tokens; header-only GETs fail when a
+     * reverse proxy strips custom headers and returns an HTML gate with HTTP 200.
+     * Never log the returned URL (contains the token).
+     */
+    static String urlWithQueryToken(String url, String token) {
+        if (url == null || url.isEmpty()) return url == null ? "" : url;
+        if (token == null || token.isEmpty()) return url;
+        if (TOKEN_PATTERN.matcher(url).find()) return url;
+        return url + (url.contains("?") ? "&" : "?") + "X-Plex-Token=" + token;
+    }
+
+    /** Host+path only for logs — strips query (tokens) and user-info. */
+    static String safeUrlForLog(String url) {
+        if (url == null || url.isEmpty()) return "";
+        try {
+            HttpUrl parsed = HttpUrl.parse(url);
+            if (parsed != null) {
+                return parsed.newBuilder().username("").password("").query(null).fragment(null).build().toString();
+            }
+        } catch (Exception ignored) {
+        }
+        int q = url.indexOf('?');
+        return q >= 0 ? url.substring(0, q) : url;
+    }
+
     private static Request.Builder plexRequest(String url, String token) {
+        // Dual auth: header (Plex preferred) + query (matches playback/image URLs; proxy-safe).
+        String urlForRequest = urlWithQueryToken(url, token);
         Request.Builder b = new Request.Builder()
-                .url(url)
+                .url(urlForRequest)
                 .addHeader("Accept", "application/json")
                 .addHeader("X-Plex-Client-Identifier", deviceId)
                 .addHeader("X-Plex-Product", clientName)
@@ -662,24 +1077,50 @@ public class PlexApi {
     }
 
     private static void getJson(String url, String token, SimpleCallback callback) {
+        final String logUrl = safeUrlForLog(url);
         Request request = plexRequest(url, token).get().build();
         getClient().newCall(request).enqueue(new okhttp3.Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                Log.e(TAG, "GET failed: " + url, e);
+                Log.e(TAG, "GET failed: " + logUrl + " " + e.getClass().getSimpleName());
                 getMainHandler().post(() -> callback.onError("Network error: " + e.getMessage()));
             }
 
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 try {
+                    String contentType = response.header("Content-Type");
+                    if (contentType == null || contentType.isEmpty()) {
+                        if (response.body() != null && response.body().contentType() != null) {
+                            contentType = response.body().contentType().toString();
+                        } else {
+                            contentType = "";
+                        }
+                    }
                     String body = response.body() != null ? response.body().string() : "";
+                    int code = response.code();
+                    int len = body != null ? body.length() : 0;
+                    String kind = classifyBodyKind(body);
+                    // Safe diagnostics: never log tokens or body contents.
+                    Log.i(TAG, "GET " + logUrl
+                            + " status=" + code
+                            + " contentType=" + contentType
+                            + " len=" + len
+                            + " bodyKind=" + kind
+                            + " redirects=" + (response.priorResponse() != null));
                     if (!response.isSuccessful()) {
-                        final String msg = "HTTP error " + response.code();
+                        final String msg = "HTTP error " + code;
                         getMainHandler().post(() -> callback.onError(msg));
                         return;
                     }
-                    getMainHandler().post(() -> callback.onSuccess(body));
+                    if ("html".equals(kind)) {
+                        Log.w(TAG, "GET " + logUrl + " returned HTML (not Plex API JSON/XML)");
+                        getMainHandler().post(() -> callback.onError(
+                                "Plex returned HTML (check Server URL; use http://host:32400, not /web)"));
+                        return;
+                    }
+                    final String okBody = body;
+                    getMainHandler().post(() -> callback.onSuccess(okBody));
                 } finally {
                     response.close();
                 }
@@ -743,36 +1184,26 @@ public class PlexApi {
             @Override
             public void onSuccess(String body) {
                 try {
-                    JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-                    JsonArray dirs = null;
-                    if (root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()) {
-                        JsonObject mc = root.getAsJsonObject("MediaContainer");
-                        if (mc.has("Directory") && mc.get("Directory").isJsonArray()) {
-                            dirs = mc.getAsJsonArray("Directory");
-                        }
-                    }
-                    if (dirs == null || dirs.size() == 0) {
+                    List<LibrarySection> sections = parseLibrarySections(body);
+                    if (sections.isEmpty()) {
                         callback.onError("partId " + partId + " not found in library");
                         return;
                     }
                     java.util.ArrayList<String> sectionUrls = new java.util.ArrayList<>();
-                    for (int i = 0; i < dirs.size(); i++) {
-                        JsonElement el = dirs.get(i);
-                        if (el == null || !el.isJsonObject()) continue;
-                        JsonObject dir = el.getAsJsonObject();
-                        String key = optString(dir, "key");
-                        String type = optString(dir, "type");
+                    for (LibrarySection section : sections) {
+                        String key = section.key;
                         if (key.isEmpty()) continue;
                         // type=1 movies, type=4 episodes
-                        if ("movie".equalsIgnoreCase(type)) {
+                        if ("movie".equalsIgnoreCase(section.type)) {
                             sectionUrls.add(base + "/library/sections/" + key + "/all?type=1");
-                        } else if ("show".equalsIgnoreCase(type)) {
+                        } else if ("show".equalsIgnoreCase(section.type)) {
                             sectionUrls.add(base + "/library/sections/" + key + "/all?type=4");
                         }
                     }
                     searchSectionsSequentially(base, token, partId, sectionUrls, 0, callback);
                 } catch (Exception e) {
-                    callback.onError("Failed to parse sections: " + e.getMessage());
+                    Log.w(TAG, "resolveViaSections parse: " + e.getClass().getSimpleName());
+                    callback.onError("Failed to parse sections");
                 }
             }
 
@@ -1044,33 +1475,21 @@ public class PlexApi {
             @Override
             public void onSuccess(String body) {
                 try {
-                    JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-                    JsonArray dirs = null;
-                    if (root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()) {
-                        JsonObject mc = root.getAsJsonObject("MediaContainer");
-                        if (mc.has("Directory") && mc.get("Directory").isJsonArray()) {
-                            dirs = mc.getAsJsonArray("Directory");
-                        }
-                    }
+                    List<LibrarySection> sections = parseLibrarySections(body);
                     java.util.ArrayList<String> urls = new java.util.ArrayList<>();
-                    if (dirs != null) {
-                        for (int i = 0; i < dirs.size(); i++) {
-                            JsonElement el = dirs.get(i);
-                            if (el == null || !el.isJsonObject()) continue;
-                            JsonObject dir = el.getAsJsonObject();
-                            String key = optString(dir, "key");
-                            String type = optString(dir, "type");
-                            if (key.isEmpty()) continue;
-                            if ("movie".equalsIgnoreCase(type)) {
-                                urls.add(base + "/library/sections/" + key + "/all?type=1");
-                            } else if ("show".equalsIgnoreCase(type)) {
-                                urls.add(base + "/library/sections/" + key + "/all?type=4");
-                            }
+                    for (LibrarySection section : sections) {
+                        String key = section.key;
+                        if (key.isEmpty()) continue;
+                        if ("movie".equalsIgnoreCase(section.type)) {
+                            urls.add(base + "/library/sections/" + key + "/all?type=1");
+                        } else if ("show".equalsIgnoreCase(section.type)) {
+                            urls.add(base + "/library/sections/" + key + "/all?type=4");
                         }
                     }
                     searchPathSectionsSequentially(token, serverPath, urls, 0, callback);
                 } catch (Exception e) {
-                    callback.onNotFound("Parse error: " + e.getMessage());
+                    Log.w(TAG, "searchPathViaSections parse: " + e.getClass().getSimpleName());
+                    callback.onNotFound("Failed to parse sections");
                 }
             }
 
@@ -1199,10 +1618,8 @@ public class PlexApi {
      * Extracts a clearLogo path from a Metadata object Image array, or empty.
      */
     static String extractClearLogoPath(JsonObject meta) {
-        if (meta == null || !meta.has("Image") || !meta.get("Image").isJsonArray()) {
-            return "";
-        }
-        JsonArray images = meta.getAsJsonArray("Image");
+        if (meta == null) return "";
+        JsonArray images = memberAsArray(meta, "Image");
         for (int i = 0; i < images.size(); i++) {
             JsonElement el = images.get(i);
             if (el == null || !el.isJsonObject()) continue;
@@ -1217,16 +1634,25 @@ public class PlexApi {
 
     /**
      * Parses movie/show Metadata entries that have background art into screensaver items.
+     * Accepts JSON or XML (PMS may ignore Accept: application/json).
      * Logo is optional (transparent clearLogo only — callers must not invent text logos).
      */
-    static List<ScreensaverItem> parseScreensaverItems(String jsonBody) {
+    static List<ScreensaverItem> parseScreensaverItems(String body) {
         List<ScreensaverItem> out = new ArrayList<>();
-        if (jsonBody == null || jsonBody.isEmpty()) return out;
+        if (body == null || body.isEmpty()) return out;
         try {
-            JsonObject root = JsonParser.parseString(jsonBody).getAsJsonObject();
-            JsonObject mc = root.has("MediaContainer") ? root.getAsJsonObject("MediaContainer") : root;
-            if (!mc.has("Metadata") || !mc.get("Metadata").isJsonArray()) return out;
-            JsonArray metadata = mc.getAsJsonArray("Metadata");
+            String kind = classifyBodyKind(body);
+            if ("html".equals(kind) || "empty".equals(kind) || "other".equals(kind)) {
+                Log.w(TAG, "parseScreensaverItems skip bodyKind=" + kind);
+                return out;
+            }
+            if ("xml".equals(kind)) {
+                return parseScreensaverItemsXml(stripBom(body));
+            }
+            JsonObject root = JsonParser.parseString(stripBom(body)).getAsJsonObject();
+            JsonObject mc = root.has("MediaContainer") && root.get("MediaContainer").isJsonObject()
+                    ? root.getAsJsonObject("MediaContainer") : root;
+            JsonArray metadata = memberAsArray(mc, "Metadata");
             for (int i = 0; i < metadata.size(); i++) {
                 JsonElement el = metadata.get(i);
                 if (el == null || !el.isJsonObject()) continue;
@@ -1247,9 +1673,61 @@ public class PlexApi {
                 out.add(new ScreensaverItem(ratingKey, title, art, logo, date, type));
             }
         } catch (Exception e) {
-            Log.w(TAG, "parseScreensaverItems: " + e.getMessage());
+            // Do not log body (may be large); never log tokens.
+            Log.w(TAG, "parseScreensaverItems: " + e.getClass().getSimpleName());
         }
         return out;
+    }
+
+    private static List<ScreensaverItem> parseScreensaverItemsXml(String body) throws Exception {
+        List<ScreensaverItem> out = new ArrayList<>();
+        Document doc = parseXmlDocument(body);
+        // JSON Metadata maps to Video (movies) or Directory (shows) in PMS XML.
+        collectScreensaverXmlElements(doc.getElementsByTagName("Video"), out);
+        collectScreensaverXmlElements(doc.getElementsByTagName("Directory"), out);
+        collectScreensaverXmlElements(doc.getElementsByTagName("Metadata"), out);
+        return out;
+    }
+
+    private static void collectScreensaverXmlElements(NodeList nodes, List<ScreensaverItem> out) {
+        if (nodes == null) return;
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Node n = nodes.item(i);
+            if (n.getNodeType() != Node.ELEMENT_NODE) continue;
+            Element el = (Element) n;
+            String type = el.getAttribute("type");
+            if (type == null || type.isEmpty()) {
+                if ("Video".equals(el.getTagName())) type = "movie";
+            }
+            if (!"movie".equalsIgnoreCase(type) && !"show".equalsIgnoreCase(type)) continue;
+            String art = el.getAttribute("art");
+            if (art == null || art.isEmpty()) continue;
+            String ratingKey = el.getAttribute("ratingKey");
+            if (ratingKey == null || ratingKey.isEmpty()) continue;
+            String title = el.getAttribute("title");
+            if (title == null) title = "";
+            String date = el.getAttribute("originallyAvailableAt");
+            if (date == null || date.isEmpty()) {
+                String year = el.getAttribute("year");
+                if (year != null && !year.isEmpty()) date = year;
+                else date = "";
+            }
+            String logo = "";
+            NodeList images = el.getElementsByTagName("Image");
+            for (int j = 0; j < images.getLength(); j++) {
+                Node in = images.item(j);
+                if (in.getNodeType() != Node.ELEMENT_NODE) continue;
+                Element img = (Element) in;
+                if ("clearLogo".equalsIgnoreCase(img.getAttribute("type"))) {
+                    String url = img.getAttribute("url");
+                    if (url != null && !url.isEmpty()) {
+                        logo = url;
+                        break;
+                    }
+                }
+            }
+            out.add(new ScreensaverItem(ratingKey, title, art, logo, date, type));
+        }
     }
 
     /**
@@ -1264,36 +1742,42 @@ public class PlexApi {
             return;
         }
         String base = baseUrl(serverUrl);
+        Log.i(TAG, "listScreensaverCandidates GET " + safeUrlForLog(base + "/library/sections"));
         getJson(base + "/library/sections", token, new SimpleCallback() {
             @Override
             public void onSuccess(String body) {
                 List<String> sectionUrls = new ArrayList<>();
+                String kind = classifyBodyKind(body);
                 try {
-                    JsonObject root = JsonParser.parseString(body).getAsJsonObject();
-                    JsonObject mc = root.has("MediaContainer")
-                            ? root.getAsJsonObject("MediaContainer") : root;
-                    if (mc.has("Directory") && mc.get("Directory").isJsonArray()) {
-                        JsonArray dirs = mc.getAsJsonArray("Directory");
-                        for (int i = 0; i < dirs.size(); i++) {
-                            JsonElement el = dirs.get(i);
-                            if (el == null || !el.isJsonObject()) continue;
-                            JsonObject dir = el.getAsJsonObject();
-                            String type = optString(dir, "type");
-                            // movie libraries type=movie; show libraries type=show
-                            if (!"movie".equalsIgnoreCase(type) && !"show".equalsIgnoreCase(type)) {
-                                continue;
-                            }
-                            String key = optString(dir, "key");
-                            if (key.isEmpty()) continue;
-                            String path = key.startsWith("/") ? key : "/library/sections/" + key;
-                            sectionUrls.add(base + path + "/all");
+                    List<LibrarySection> sections = parseLibrarySections(body);
+                    for (LibrarySection section : sections) {
+                        // movie libraries type=movie; show libraries type=show
+                        if (!"movie".equalsIgnoreCase(section.type)
+                                && !"show".equalsIgnoreCase(section.type)) {
+                            continue;
                         }
+                        String key = section.key;
+                        if (key.isEmpty()) continue;
+                        String path = key.startsWith("/") ? key : "/library/sections/" + key;
+                        sectionUrls.add(base + path + "/all");
                     }
                 } catch (Exception e) {
-                    callback.onError("Failed to parse library sections: " + e.getMessage());
+                    // Avoid leaking response snippets (Gson may include them) or tokens.
+                    Log.w(TAG, "listScreensaverCandidates sections: "
+                            + e.getClass().getSimpleName()
+                            + " bodyKind=" + kind
+                            + " msg=" + (e.getMessage() != null ? e.getMessage() : ""));
+                    if ("html".equals(kind)
+                            || (e.getMessage() != null && e.getMessage().contains("HTML"))) {
+                        callback.onError(
+                                "Plex returned HTML (check Server URL; use http://host:32400, not /web)");
+                    } else {
+                        callback.onError("Failed to parse library sections");
+                    }
                     return;
                 }
                 if (sectionUrls.isEmpty()) {
+                    Log.w(TAG, "listScreensaverCandidates: no movie/show sections bodyKind=" + kind);
                     callback.onError("No movie/show libraries found");
                     return;
                 }

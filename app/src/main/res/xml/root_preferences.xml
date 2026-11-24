@@ -203,6 +203,21 @@
             android:summary="@string/screensaver_show_logo_summary" />
 
         <SwitchPreference
+            android:defaultValue="false"
+            android:key="screensaver_allow_text_title"
+            android:title="@string/screensaver_allow_text_title_title"
+            android:summary="@string/screensaver_allow_text_title_summary" />
+
+        <ListPreference
+            android:defaultValue="medium"
+            android:key="screensaver_logo_size"
+            android:title="@string/screensaver_logo_size_title"
+            android:summary="@string/screensaver_logo_size_summary"
+            android:entries="@array/screensaver_logo_size_entries"
+            android:entryValues="@array/screensaver_logo_size_values"
+            android:dependency="screensaver_show_logo" />
+
+        <SwitchPreference
             android:defaultValue="true"
             android:key="screensaver_show_date"
             android:title="@string/screensaver_show_date_title"

@@ -1,5 +1,14 @@
 # Release notes
 
+## 2026.11.13 — PlezyToZidoo+ branding + settings refinements
+
+- **Branding:** Display name **PlezyToZidoo+** by **Angel Labs** (package `com.plezyplextozidoo` unchanged — installs as an update). Settings header shows PlezyToZidoo+ / by Angel Labs; version top-right unchanged. Angel Labs orange+white logo replaces the purple triangle launcher / settings header icon (when supplied artwork is present).
+- **Settings layout:** One scrolling page with two independently stacked columns — left: Playback, Up Next, Plex connection; right: Plex screensaver, Path substitutions; full-width Settings & diagnostics below. Keeps 11.12 TV focus rings; no layout jump on focus.
+- **Additional path rules:** Unused rules show **Not set** placeholders (not example paths or password-mask dots). Saved values and stored passwords preserved; examples never treated as real rules.
+- **Export security:** “Include passwords in export” defaults OFF; resets to OFF after each export **and** whenever Settings opens (safer sticky-opt-in UX). When passwords are excluded, Plex tokens / SMB passwords are omitted and embedded auth in URLs (`X-Plex-Token`, `user:pass@`) is stripped from the export file.
+- Playback / Skip Intro/Credits (11.9 multi-segment) / Up Next / screensaver / path-substitution logic unchanged.
+- Version `2026.11.13` / `versionCode` `20261134`.
+
 ## 2026.11.12 — Settings focus + additional rules UI
 
 - Stronger TV remote focus: distinct unselected / selected / focused / selected+focused (segmented, buttons, fields); whole-row toggle highlight; focus rings not clipped; no layout jump on focus.

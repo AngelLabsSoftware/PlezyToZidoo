@@ -209,6 +209,22 @@ public class PlexApi {
         }
     }
 
+    /**
+     * One valid Plex credits/outro marker. All valid segments are retained;
+     * Skip Credits targets the current segment's end (preserves mid/post-credit scenes).
+     */
+    public static class CreditSegment {
+        public final long startMs;
+        public final long endMs;
+        public final boolean isFinal;
+
+        public CreditSegment(long startMs, long endMs, boolean isFinal) {
+            this.startMs = startMs;
+            this.endMs = endMs;
+            this.isFinal = isFinal;
+        }
+    }
+
     public static class MetadataResult {
         public final String ratingKey;
         public final String filePath;
@@ -223,8 +239,12 @@ public class PlexApi {
         public final boolean isEpisode;
         public final long introStartMs;
         public final long introEndMs;
+        /** Earliest credits segment start, or -1 when none. */
         public final long creditStartMs;
+        /** Earliest credits segment end, or -1 when none. */
         public final long creditEndMs;
+        /** All valid credits/outro segments, sorted by start ascending. Never null. */
+        public final List<CreditSegment> creditSegments;
         public final String thumb;
         public final String art;
         public final String metadataKey;
@@ -235,6 +255,19 @@ public class PlexApi {
                               boolean isEpisode, long introStartMs, long introEndMs,
                               long creditStartMs, long creditEndMs, String thumb, String art,
                               String metadataKey) {
+            this(ratingKey, filePath, viewOffsetMs, durationMs, title, seriesTitle,
+                    seriesRatingKey, seasonRatingKey, seasonNumber, episodeNumber, isEpisode,
+                    introStartMs, introEndMs, creditStartMs, creditEndMs,
+                    Collections.emptyList(), thumb, art, metadataKey);
+        }
+
+        public MetadataResult(String ratingKey, String filePath, long viewOffsetMs, long durationMs,
+                              String title, String seriesTitle, String seriesRatingKey,
+                              String seasonRatingKey, int seasonNumber, int episodeNumber,
+                              boolean isEpisode, long introStartMs, long introEndMs,
+                              long creditStartMs, long creditEndMs,
+                              List<CreditSegment> creditSegments,
+                              String thumb, String art, String metadataKey) {
             this.ratingKey = ratingKey;
             this.filePath = filePath;
             this.viewOffsetMs = viewOffsetMs;
@@ -250,6 +283,9 @@ public class PlexApi {
             this.introEndMs = introEndMs;
             this.creditStartMs = creditStartMs;
             this.creditEndMs = creditEndMs;
+            this.creditSegments = creditSegments != null
+                    ? Collections.unmodifiableList(new ArrayList<>(creditSegments))
+                    : Collections.emptyList();
             this.thumb = thumb;
             this.art = art;
             this.metadataKey = metadataKey;
@@ -261,13 +297,24 @@ public class PlexApi {
         public final long introEndMs;
         public final long creditStartMs;
         public final long creditEndMs;
+        /** All valid credits/outro segments, sorted by start ascending. Never null. */
+        public final List<CreditSegment> creditSegments;
 
         public MarkerResult(long introStartMs, long introEndMs,
                             long creditStartMs, long creditEndMs) {
+            this(introStartMs, introEndMs, creditStartMs, creditEndMs, Collections.emptyList());
+        }
+
+        public MarkerResult(long introStartMs, long introEndMs,
+                            long creditStartMs, long creditEndMs,
+                            List<CreditSegment> creditSegments) {
             this.introStartMs = introStartMs;
             this.introEndMs = introEndMs;
             this.creditStartMs = creditStartMs;
             this.creditEndMs = creditEndMs;
+            this.creditSegments = creditSegments != null
+                    ? Collections.unmodifiableList(new ArrayList<>(creditSegments))
+                    : Collections.emptyList();
         }
 
         long introStartMs() { return introStartMs; }
@@ -276,7 +323,8 @@ public class PlexApi {
         long creditEndMs() { return creditEndMs; }
     }
 
-    private static final MarkerResult EMPTY_MARKERS = new MarkerResult(-1, -1, -1, -1);
+    private static final MarkerResult EMPTY_MARKERS =
+            new MarkerResult(-1, -1, -1, -1, Collections.emptyList());
 
     // --- URI parsing ---
 
@@ -497,6 +545,8 @@ public class PlexApi {
     /**
      * Parses Marker array from a Plex metadata JSON object (or MediaContainer wrapper).
      * Marker types: intro, credits (also accepts outro). Offsets are milliseconds.
+     * Retains <strong>all</strong> valid credits/outro markers (sorted by start); does not
+     * discard earlier segments when a {@code final} marker exists.
      */
     static MarkerResult parseMarkers(JsonObject metadataOrRoot) {
         try {
@@ -507,8 +557,9 @@ public class PlexApi {
                 return EMPTY_MARKERS;
             }
             JsonArray markers = meta.getAsJsonArray("Marker");
-            long introStart = -1, introEnd = -1, creditStart = -1, creditEnd = -1;
-            long introStartBest = Long.MAX_VALUE, creditStartBest = Long.MAX_VALUE;
+            long introStart = -1, introEnd = -1;
+            long introStartBest = Long.MAX_VALUE;
+            List<CreditSegment> creditSegments = new ArrayList<>();
 
             for (int i = 0; i < markers.size(); i++) {
                 JsonElement el = markers.get(i);
@@ -517,7 +568,8 @@ public class PlexApi {
                 String type = optString(m, "type").toLowerCase(Locale.ENGLISH);
                 long start = optLong(m, "startTimeOffset", -1);
                 long end = optLong(m, "endTimeOffset", -1);
-                if (start < 0 || end <= 0) continue;
+                // Valid range: start >= 0 and end > start. Invalid/ambiguous markers are skipped.
+                if (start < 0 || end <= start) continue;
 
                 if ("intro".equals(type)) {
                     if (start < introStartBest) {
@@ -526,17 +578,71 @@ public class PlexApi {
                         introEnd = end;
                     }
                 } else if ("credits".equals(type) || "outro".equals(type)) {
-                    if (start < creditStartBest) {
-                        creditStartBest = start;
-                        creditStart = start;
-                        creditEnd = end;
-                    }
+                    creditSegments.add(new CreditSegment(start, end, parseMarkerFinal(m)));
                 }
             }
-            return new MarkerResult(introStart, introEnd, creditStart, creditEnd);
+
+            creditSegments.sort((a, b) -> Long.compare(a.startMs, b.startMs));
+            long creditStart = -1, creditEnd = -1;
+            if (!creditSegments.isEmpty()) {
+                creditStart = creditSegments.get(0).startMs;
+                creditEnd = creditSegments.get(0).endMs;
+            }
+            return new MarkerResult(introStart, introEnd, creditStart, creditEnd, creditSegments);
         } catch (Exception e) {
             return EMPTY_MARKERS;
         }
+    }
+
+    /**
+     * Parses Plex Marker {@code final} (boolean, 0/1 number, or "true"/"1" string).
+     * Nested {@code Attributes.final} is also accepted when present.
+     */
+    static boolean parseMarkerFinal(JsonObject marker) {
+        if (marker == null) return false;
+        if (readFinalFlag(marker)) return true;
+        if (marker.has("Attributes") && marker.get("Attributes").isJsonObject()) {
+            return readFinalFlag(marker.getAsJsonObject("Attributes"));
+        }
+        return false;
+    }
+
+    private static boolean readFinalFlag(JsonObject object) {
+        if (object == null || !object.has("final") || object.get("final").isJsonNull()) {
+            return false;
+        }
+        JsonElement el = object.get("final");
+        if (!el.isJsonPrimitive()) return false;
+        try {
+            if (el.getAsJsonPrimitive().isBoolean()) {
+                return el.getAsBoolean();
+            }
+            if (el.getAsJsonPrimitive().isNumber()) {
+                return el.getAsInt() != 0;
+            }
+            String s = el.getAsString().trim().toLowerCase(Locale.ENGLISH);
+            return "1".equals(s) || "true".equals(s) || "yes".equals(s);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /** Safe one-line diagnostic of all credits markers (no tokens/paths). */
+    static String formatCreditSegmentsForLog(List<CreditSegment> segments) {
+        if (segments == null || segments.isEmpty()) {
+            return "[]";
+        }
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < segments.size(); i++) {
+            CreditSegment s = segments.get(i);
+            if (i > 0) sb.append(", ");
+            sb.append('{').append("start=").append(s.startMs)
+                    .append(", end=").append(s.endMs)
+                    .append(", final=").append(s.isFinal)
+                    .append('}');
+        }
+        sb.append(']');
+        return sb.toString();
     }
 
     static MarkerResult parseMarkersFromBody(String jsonBody) {
@@ -602,6 +708,7 @@ public class PlexApi {
                 seasonNumber, episodeNumber, isEpisode,
                 markers.introStartMs, markers.introEndMs,
                 markers.creditStartMs, markers.creditEndMs,
+                markers.creditSegments,
                 thumb, art, metadataKey
         );
     }

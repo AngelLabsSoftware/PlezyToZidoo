@@ -65,6 +65,7 @@ public final class ScreensaverRenderer {
     private final ImageView artView;
     private final ImageView artNextView;
     private final ImageView logoView;
+    private final TextView titleView;
     private final TextView dateView;
     private final TextView statusView;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -78,12 +79,15 @@ public final class ScreensaverRenderer {
     private boolean showingPrimary = true;
     private boolean allowLowerRes;
     private boolean showLogo;
+    /** When false (default), skip titles without a usable clearLogo. */
+    private boolean allowTextTitle;
     private boolean showDate;
     /** {@link #LOGO_SIZE_SMALL} or {@link #LOGO_SIZE_ORIGINAL}. */
     private String logoSize = LOGO_SIZE_SMALL;
     private long intervalMs = DEFAULT_INTERVAL_MS;
 
     private final Runnable advanceRunnable = this::advance;
+    private final Runnable retryPlaylistRunnable = this::retryPlaylistLater;
 
     public ScreensaverRenderer(Context context, View root) {
         this.appContext = context.getApplicationContext();
@@ -91,8 +95,15 @@ public final class ScreensaverRenderer {
         this.artView = root.findViewById(R.id.screensaver_art);
         this.artNextView = root.findViewById(R.id.screensaver_art_next);
         this.logoView = root.findViewById(R.id.screensaver_logo);
+        this.titleView = root.findViewById(R.id.screensaver_title);
         this.dateView = root.findViewById(R.id.screensaver_date);
         this.statusView = root.findViewById(R.id.screensaver_status);
+    }
+
+    private void retryPlaylistLater() {
+        if (!running.get() || playlist.isEmpty()) return;
+        statusView.setVisibility(View.GONE);
+        tryShowAt(0, 0);
     }
 
     public void start() {
@@ -141,6 +152,10 @@ public final class ScreensaverRenderer {
         cancelArtMotion(artView);
         cancelArtMotion(artNextView);
         logoView.animate().cancel();
+        if (titleView != null) {
+            titleView.animate().cancel();
+            titleView.setVisibility(View.GONE);
+        }
         try {
             Glide.with(appContext).clear(artView);
             Glide.with(appContext).clear(artNextView);
@@ -154,6 +169,7 @@ public final class ScreensaverRenderer {
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(appContext);
         allowLowerRes = prefs.getBoolean("screensaver_allow_lower_res", false);
         showLogo = prefs.getBoolean("screensaver_show_logo", true);
+        allowTextTitle = prefs.getBoolean("screensaver_allow_text_title", false);
         showDate = prefs.getBoolean("screensaver_show_date", true);
         logoSize = normalizeLogoSize(prefs.getString("screensaver_logo_size", LOGO_SIZE_SMALL));
         int seconds = 20;
@@ -171,6 +187,23 @@ public final class ScreensaverRenderer {
         return LOGO_SIZE_SMALL;
     }
 
+    /**
+     * Candidate gate: qualifying background plus usable clearLogo, unless text-title
+     * fallback is enabled. Does not silently relax 4K / logo requirements.
+     */
+    static boolean isScreensaverCandidateEligible(PlexApi.ScreensaverItem item,
+                                                  boolean allowTextTitleFallback) {
+        if (item == null || item.artPath == null || item.artPath.isEmpty()) {
+            return false;
+        }
+        if (item.hasTransparentLogo()) {
+            return true;
+        }
+        return allowTextTitleFallback
+                && item.title != null
+                && !item.title.trim().isEmpty();
+    }
+
     private void showCurrentThenSchedule() {
         if (!running.get() || playlist.isEmpty()) return;
         tryShowAt(index, 0);
@@ -179,13 +212,29 @@ public final class ScreensaverRenderer {
     private void tryShowAt(int startIndex, int attempts) {
         if (!running.get() || playlist.isEmpty()) return;
         if (attempts >= playlist.size()) {
-            status(allowLowerRes
-                    ? "No displayable Plex artwork."
-                    : "No genuine 4K artwork found. Enable “Allow lower-res art” in Settings, or add 4K fanart in Plex.");
+            String msg;
+            if (!allowLowerRes && !allowTextTitle) {
+                msg = "No genuine 4K artwork with a usable logo. Enable “Allow lower-res art” or “Allow text title fallback”, or add 4K fanart + clearLogo in Plex.";
+            } else if (!allowLowerRes) {
+                msg = "No genuine 4K artwork found. Enable “Allow lower-res art” in Settings, or add 4K fanart in Plex.";
+            } else if (!allowTextTitle) {
+                msg = "No displayable Plex artwork with a usable logo. Enable “Allow text title fallback” or add clearLogo art in Plex.";
+            } else {
+                msg = "No displayable Plex artwork.";
+            }
+            status(msg);
+            // Graceful stop + retry later without relaxing requirements (no infinite tight loop).
+            handler.removeCallbacks(retryPlaylistRunnable);
+            handler.postDelayed(retryPlaylistRunnable, Math.max(intervalMs * 2, 60_000L));
             return;
         }
         int i = Math.floorMod(startIndex, playlist.size());
         PlexApi.ScreensaverItem item = playlist.get(i);
+        if (!isScreensaverCandidateEligible(item, allowTextTitle)) {
+            Log.d(TAG, "Skip candidate without logo/title fallback: " + item.title);
+            tryShowAt(i + 1, attempts + 1);
+            return;
+        }
         String artUrl = PlexApi.buildImageUrl(serverUrl, item.artPath, token);
         ScreensaverArtProbe.measure(artUrl, new ScreensaverArtProbe.Callback() {
             @Override
@@ -198,11 +247,8 @@ public final class ScreensaverRenderer {
                         tryShowAt(i + 1, attempts + 1);
                         return;
                     }
-                    index = i;
-                    displayItem(item, artUrl);
-                    preloadNext();
-                    handler.removeCallbacks(advanceRunnable);
-                    handler.postDelayed(advanceRunnable, intervalMs);
+                    // Preload+decode art (and logo when present) before committing the transition.
+                    prepareAndDisplay(item, artUrl, i, attempts);
                 });
             }
 
@@ -216,12 +262,126 @@ public final class ScreensaverRenderer {
         });
     }
 
+    /**
+     * Decodes art (and logo if required) into memory before crossfading. Skips the
+     * candidate if a required logo is missing or fails to decode.
+     */
+    private void prepareAndDisplay(PlexApi.ScreensaverItem item, String artUrl,
+                                   int itemIndex, int attempts) {
+        if (!running.get()) return;
+        final boolean wantsLogo = showLogo && item.hasTransparentLogo();
+        final boolean logoRequired = !allowTextTitle;
+        int w = root.getWidth() > 0 ? root.getWidth() : 1920;
+        int h = root.getHeight() > 0 ? root.getHeight() : 1080;
+
+        Glide.with(appContext)
+                .load(artUrl)
+                .apply(new RequestOptions()
+                        .override(w, h)
+                        .centerCrop()
+                        .diskCacheStrategy(DiskCacheStrategy.NONE)
+                        .skipMemoryCache(false))
+                .listener(new RequestListener<Drawable>() {
+                    @Override
+                    public boolean onLoadFailed(@Nullable GlideException e, Object model,
+                                                Target<Drawable> target, boolean isFirstResource) {
+                        handler.post(() -> {
+                            if (!running.get()) return;
+                            Log.d(TAG, "Skip art decode failure for " + item.title);
+                            tryShowAt(itemIndex + 1, attempts + 1);
+                        });
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onResourceReady(Drawable resource, Object model,
+                                                   Target<Drawable> target, DataSource dataSource,
+                                                   boolean isFirstResource) {
+                        handler.post(() -> {
+                            if (!running.get()) return;
+                            if (wantsLogo) {
+                                decodeLogoThenDisplay(item, artUrl, itemIndex, attempts, logoRequired);
+                            } else if (logoRequired && !item.hasTransparentLogo()) {
+                                // Should have been filtered earlier; skip rather than relax.
+                                tryShowAt(itemIndex + 1, attempts + 1);
+                            } else {
+                                commitDisplay(item, artUrl, null, allowTextTitle);
+                                index = itemIndex;
+                                preloadNext();
+                                handler.removeCallbacks(advanceRunnable);
+                                handler.postDelayed(advanceRunnable, intervalMs);
+                            }
+                        });
+                        return true; // we draw via displayItem ourselves
+                    }
+                })
+                .preload(w, h);
+    }
+
+    private void decodeLogoThenDisplay(PlexApi.ScreensaverItem item, String artUrl,
+                                       int itemIndex, int attempts, boolean logoRequired) {
+        String logoUrl = PlexApi.buildImageUrl(serverUrl, item.logoPath, token);
+        int[] max = logoMaxPx(root, logoSize);
+        RequestOptions logoOpts = new RequestOptions()
+                .fitCenter()
+                .diskCacheStrategy(DiskCacheStrategy.NONE)
+                .skipMemoryCache(false);
+        if (LOGO_SIZE_SMALL.equals(logoSize)) {
+            logoOpts = logoOpts.override(max[0], max[1]);
+        }
+        Glide.with(appContext)
+                .load(logoUrl)
+                .apply(logoOpts)
+                .listener(new RequestListener<Drawable>() {
+                    @Override
+                    public boolean onLoadFailed(@Nullable GlideException e, Object model,
+                                                Target<Drawable> target, boolean isFirstResource) {
+                        handler.post(() -> {
+                            if (!running.get()) return;
+                            if (logoRequired) {
+                                Log.d(TAG, "Skip logo decode failure for " + item.title);
+                                tryShowAt(itemIndex + 1, attempts + 1);
+                            } else {
+                                commitDisplay(item, artUrl, null, true);
+                                index = itemIndex;
+                                preloadNext();
+                                handler.removeCallbacks(advanceRunnable);
+                                handler.postDelayed(advanceRunnable, intervalMs);
+                            }
+                        });
+                        return true;
+                    }
+
+                    @Override
+                    public boolean onResourceReady(Drawable resource, Object model,
+                                                   Target<Drawable> target, DataSource dataSource,
+                                                   boolean isFirstResource) {
+                        handler.post(() -> {
+                            if (!running.get()) return;
+                            commitDisplay(item, artUrl, resource, false);
+                            index = itemIndex;
+                            preloadNext();
+                            handler.removeCallbacks(advanceRunnable);
+                            handler.postDelayed(advanceRunnable, intervalMs);
+                        });
+                        return true;
+                    }
+                })
+                .preload();
+    }
+
+    private void commitDisplay(PlexApi.ScreensaverItem item, String artUrl,
+                               @Nullable Drawable decodedLogo, boolean useTextTitle) {
+        displayItem(item, artUrl, decodedLogo, useTextTitle);
+    }
+
     private void advance() {
         if (!running.get() || playlist.isEmpty()) return;
         tryShowAt(index + 1, 0);
     }
 
-    private void displayItem(PlexApi.ScreensaverItem item, String artUrl) {
+    private void displayItem(PlexApi.ScreensaverItem item, String artUrl,
+                             @Nullable Drawable decodedLogo, boolean useTextTitle) {
         statusView.setVisibility(View.GONE);
         ImageView incoming = showingPrimary ? artNextView : artView;
         ImageView outgoing = showingPrimary ? artView : artNextView;
@@ -232,6 +392,7 @@ public final class ScreensaverRenderer {
         int w = root.getWidth() > 0 ? root.getWidth() : 1920;
         int h = root.getHeight() > 0 ? root.getHeight() : 1080;
 
+        // Art was pre-decoded into Glide memory; into() should hit cache.
         Glide.with(appContext)
                 .load(artUrl)
                 .apply(new RequestOptions()
@@ -271,41 +432,35 @@ public final class ScreensaverRenderer {
 
         showingPrimary = !showingPrimary;
 
-        // Transparent logo only — never invent text substitutes.
-        if (showLogo && item.hasTransparentLogo()) {
-            String logoUrl = PlexApi.buildImageUrl(serverUrl, item.logoPath, token);
+        if (titleView != null) {
+            titleView.animate().cancel();
+            titleView.setVisibility(View.GONE);
+        }
+
+        if (decodedLogo != null && showLogo) {
             logoView.setVisibility(View.VISIBLE);
             logoView.setAlpha(0f);
             final String sizeMode = logoSize;
             int[] max = logoMaxPx(root, sizeMode);
-            Glide.with(appContext)
-                    .load(logoUrl)
-                    .apply(new RequestOptions()
-                            .fitCenter()
-                            .diskCacheStrategy(DiskCacheStrategy.NONE)
-                            .skipMemoryCache(false))
-                    .listener(new RequestListener<Drawable>() {
-                        @Override
-                        public boolean onLoadFailed(@Nullable GlideException e, Object model,
-                                                    Target<Drawable> target, boolean isFirstResource) {
-                            return false;
-                        }
-
-                        @Override
-                        public boolean onResourceReady(Drawable resource, Object model,
-                                                       Target<Drawable> target, DataSource dataSource,
-                                                       boolean isFirstResource) {
-                            handler.post(() -> applyLogoSize(logoView, resource, max[0], max[1],
-                                    sizeMode));
-                            return false;
-                        }
-                    })
-                    .into(logoView);
+            applyLogoSize(logoView, decodedLogo, max[0], max[1], sizeMode);
+            logoView.setImageDrawable(decodedLogo);
             logoView.animate().alpha(1f).setDuration(CROSSFADE_MS).start();
         } else {
             logoView.animate().cancel();
             logoView.setVisibility(View.GONE);
-            Glide.with(appContext).clear(logoView);
+            try {
+                Glide.with(appContext).clear(logoView);
+            } catch (Exception e) {
+                Log.w(TAG, "Glide clear logo: " + e.getMessage());
+            }
+            if (useTextTitle && titleView != null
+                    && item.title != null && !item.title.trim().isEmpty()) {
+                // Understated white text title — only when fallback is enabled.
+                titleView.setText(item.title.trim());
+                titleView.setAlpha(0f);
+                titleView.setVisibility(View.VISIBLE);
+                titleView.animate().alpha(1f).setDuration(CROSSFADE_MS).start();
+            }
         }
 
         if (showDate) {
@@ -469,6 +624,10 @@ public final class ScreensaverRenderer {
                                     .diskCacheStrategy(DiskCacheStrategy.NONE)
                                     .skipMemoryCache(false))
                             .preload(w, h);
+                    if (!isScreensaverCandidateEligible(item, allowTextTitle)) {
+                        preloadFrom(i + 1, attempts + 1);
+                        return;
+                    }
                     if (showLogo && item.hasTransparentLogo()) {
                         String logoUrl = PlexApi.buildImageUrl(serverUrl, item.logoPath, token);
                         int[] max = logoMaxPx(root, logoSize);

@@ -202,6 +202,12 @@
             android:title="@string/screensaver_show_logo_title"
             android:summary="@string/screensaver_show_logo_summary" />
 
+        <SwitchPreference
+            android:defaultValue="false"
+            android:key="screensaver_allow_text_title"
+            android:title="@string/screensaver_allow_text_title_title"
+            android:summary="@string/screensaver_allow_text_title_summary" />
+
         <ListPreference
             android:defaultValue="small"
             android:key="screensaver_logo_size"

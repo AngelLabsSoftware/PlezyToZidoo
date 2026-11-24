@@ -19,13 +19,18 @@
     <string name="skip_behavior_title">Skip Behavior</string>
     <string name="skip_behavior_summary">Manual button (default), countdown, or instant auto-skip</string>
     <string name="overlay_permission_title">Allow Skip overlay</string>
-    <string name="overlay_permission_summary">Required for Skip Intro/Credits button over the Zidoo player</string>
+    <string name="overlay_permission_summary">Required for Skip Intro/Credits over the Zidoo player. On first play after install: Android settings side panel → scroll the app list → PlezyPlexToZidoo → allow display over other apps. This is separate from Settings → Display → Screensaver.</string>
+    <string name="overlay_permission_toast">On first play: Android settings side panel → scroll app list → PlezyPlexToZidoo → allow display over other apps (not the screensaver setting).</string>
     <string name="path_sub_hint_title">Path tip</string>
     <string name="path_sub_hint_summary">On this Z9X, a working substitution is /media/ → /data/</string>
     <!-- Plex Preferences -->
     <string name="plex_server_settings">Plex Server (fallbacks)</string>
     <string name="plex_server_url_title">Server URL</string>
     <string name="plex_server_url_summary">Optional fallback, e.g. http://192.168.1.10:32400</string>
+    <string name="plex_server_url_port_title">Add Plex port 32400?</string>
+    <string name="plex_server_url_port_message">This looks like a LAN address without a port. Plex Media Server usually listens on 32400.\n\nUse %1$s?</string>
+    <string name="plex_server_url_port_yes">Use :32400</string>
+    <string name="plex_server_url_port_no">Keep as entered</string>
     <string name="plex_token_title">X-Plex-Token</string>
     <string name="plex_token_summary">Optional fallback when Plezy URI has no token</string>
     <string name="plex_test_connection_title">Test connection</string>
@@ -67,12 +72,17 @@
     <string name="screensaver_allow_lower_res_title">Allow lower-res art</string>
     <string name="screensaver_allow_lower_res_summary">Off by default. When off, only genuine 4K (or larger) fanart is shown — never upscaled 1080p labeled as 4K.</string>
     <string name="screensaver_show_logo_title">Show transparent logos</string>
-    <string name="screensaver_show_logo_summary">Uses Plex clearLogo when available. Titles are never drawn as text substitutes.</string>
+    <string name="screensaver_show_logo_summary">Uses Plex clearLogo when available. By default only titles with a usable logo are shown.</string>
+    <string name="screensaver_allow_text_title_title">Allow text title fallback</string>
+    <string name="screensaver_allow_text_title_summary">Off by default. When on, titles without a clearLogo may show as understated white text.</string>
+    <string name="screensaver_logo_size_title">Logo size</string>
+    <string name="screensaver_logo_size_summary" formatted="false">Small 25% left, Medium 50% left (default), Large 80% centred — never upscaled past native</string>
     <string name="screensaver_show_date_title">Show original release year</string>
     <string name="screensaver_show_date_summary">From Plex originallyAvailableAt / year</string>
     <string name="screensaver_preview_title">Preview screensaver</string>
     <string name="screensaver_preview_summary">Runs the same renderer as DayDream (tap to exit)</string>
     <string name="screensaver_art_desc">Plex background artwork</string>
     <string name="screensaver_logo_desc">Plex clear logo</string>
+    <string name="screensaver_title_desc">Title text fallback</string>
 
 </resources>

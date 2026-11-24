@@ -31,10 +31,16 @@ public class SkipOverlay {
     }
 
     private static final String TAG = "SkipOverlay";
-    private static final int BG_COLOR = 0xCC141414;
-    private static final int BORDER_COLOR = 0x66FFFFFF;
+    /** Unfocused: pale grey fill, white border, dark text (see button text color). */
+    private static final int BG_COLOR = 0xFFE0E0E0;
+    private static final int BORDER_COLOR = 0xFFFFFFFF;
+    /** Focused: black fill, white border, white text. */
     private static final int FOCUS_BORDER_COLOR = 0xFFFFFFFF;
-    private static final int FOCUS_BG_COLOR = 0xEE2A2A2A;
+    private static final int FOCUS_BG_COLOR = 0xFF000000;
+    private static final int TEXT_COLOR = 0xFF222222;
+    private static final int FOCUS_TEXT_COLOR = 0xFFFFFFFF;
+    /** Small corner radius — not a pill. */
+    private static final float CORNER_RADIUS_DP = 6f;
 
     private final Context appContext;
     private final WindowManager windowManager;
@@ -162,13 +168,15 @@ public class SkipOverlay {
         button = new Button(appContext);
         button.setAllCaps(false);
         button.setTypeface(Typeface.DEFAULT_BOLD);
-        button.setTextColor(Color.WHITE);
+        button.setTextColor(TEXT_COLOR);
         button.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         button.setPadding(padH, padV, padH, padV);
         button.setMinWidth((int) (160 * density));
         button.setFocusable(true);
         button.setFocusableInTouchMode(true);
-        button.setBackground(buildPillBackground());
+        button.setBackground(buildFocusBackground(density));
+        button.setOnFocusChangeListener((v, hasFocus) ->
+                button.setTextColor(hasFocus ? FOCUS_TEXT_COLOR : TEXT_COLOR));
         button.setOnClickListener(v -> {
             String seg = activeSegment;
             boolean wasCountdown = countdownMode;
@@ -232,16 +240,19 @@ public class SkipOverlay {
         }
     }
 
-    private StateListDrawable buildPillBackground() {
+    private StateListDrawable buildFocusBackground(float density) {
+        float radius = CORNER_RADIUS_DP * density;
+        int stroke = Math.max(2, Math.round(2 * density));
+
         GradientDrawable normal = new GradientDrawable();
         normal.setColor(BG_COLOR);
-        normal.setCornerRadius(999f);
-        normal.setStroke(2, BORDER_COLOR);
+        normal.setCornerRadius(radius);
+        normal.setStroke(stroke, BORDER_COLOR);
 
         GradientDrawable focused = new GradientDrawable();
         focused.setColor(FOCUS_BG_COLOR);
-        focused.setCornerRadius(999f);
-        focused.setStroke(4, FOCUS_BORDER_COLOR);
+        focused.setCornerRadius(radius);
+        focused.setStroke(stroke, FOCUS_BORDER_COLOR);
 
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_focused}, focused);

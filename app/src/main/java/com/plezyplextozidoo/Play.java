@@ -18,9 +18,11 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.util.HashSet;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.net.URLDecoder;
@@ -48,8 +50,12 @@ public class Play extends AppCompatActivity
     /**
      * Seeks Zidoo player to a position via REST API. Fire-and-forget.
      * Note: "positon" is a real typo in the Zidoo API.
+     * Marks the seek as app-initiated so poll logic does not treat it as user scrubbing.
      */
     private void seekZidoo(long positionMs) {
+        pendingAppSkipTargetMs = positionMs;
+        pendingAppSkipSetAtWallMs = System.currentTimeMillis();
+        userSeekUnsettled = false;
         new Thread(() -> {
             try {
                 okhttp3.Request request = new okhttp3.Request.Builder()
@@ -99,15 +105,28 @@ public class Play extends AppCompatActivity
     private volatile java.util.concurrent.ScheduledExecutorService progressPoller = null;
     private volatile long lastTimelineReportMs = 0;
 
-    // Intro/credit skip state
-    private volatile boolean introSkipArmed = true;
-    private volatile boolean creditSkipArmed = true;
-    private volatile boolean introOverlayDismissed = false;
-    private volatile boolean creditOverlayDismissed = false;
-    private volatile boolean introCountdownCancelled = false;
-    private volatile boolean creditCountdownCancelled = false;
+    // Intro/credit skip state — position-based; visit-scoped dismiss/skip (not permanent seek-disarm).
     private volatile long introStartMs = -1, introEndMs = -1;
+    /** Earliest credits start (diagnostic / legacy); active segment resolved per poll. */
     private volatile long creditStartMs = -1, creditEndMs = -1;
+    private final List<PlexApi.CreditSegment> creditSegments = new ArrayList<>();
+    /** Index of the credits segment currently shown / being skipped; -1 if none. */
+    private volatile int activeCreditIndex = -1;
+    /** Back / countdown cancel for the current intro visit only. */
+    private volatile boolean introVisitDismissed = false;
+    /** Confirmed/instant skip completed for the current intro visit. */
+    private volatile boolean introVisitSkipped = false;
+    /** Credits visit dismissals (Back/cancel) — cleared when playhead leaves that segment. */
+    private final Set<Integer> creditVisitDismissed = new HashSet<>();
+    /** Credits visit skips — cleared when playhead leaves that segment (re-entry rearms). */
+    private final Set<Integer> creditVisitSkipped = new HashSet<>();
+    private volatile boolean wasInIntroVisit = false;
+    private volatile int wasCreditVisitIndex = -1;
+    /** True while user FF/RW/chapter/manual seek has not settled. */
+    private volatile boolean userSeekUnsettled = false;
+    /** Target of our own skip seekTo; ignored as user scrubbing until reached/timeout. */
+    private volatile long pendingAppSkipTargetMs = -1;
+    private volatile long pendingAppSkipSetAtWallMs = 0;
     private volatile long lastPollPositionMs = -1;
     private volatile boolean zidooPlaybackActive = false;
 
@@ -125,6 +144,24 @@ public class Play extends AppCompatActivity
     static final String SKIP_BEHAVIOR_INSTANT = "instant";
     /** Hide overlay this many ms before marker end. */
     static final long SKIP_OVERLAY_END_MARGIN_MS = 1500L;
+    /**
+     * After a credits seek, treat the destination as true media end when within this
+     * many ms of duration (handles markers that end at/just before duration).
+     */
+    static final long CREDITS_NEAR_MEDIA_END_MS = 2000L;
+    /** Large backward jump → treat as user seek/scrub (settle required before rearm). */
+    static final long SEEK_JUMP_BACK_MS = 3000L;
+    /** Large forward jump (chapter-like) → user seek until settled. */
+    static final long SEEK_JUMP_FORWARD_MS = 30000L;
+    /**
+     * Per ~1s poll: faster than this forward (or reverse beyond small jitter) counts as
+     * active trick-play — hold skip UI without permanently disarming.
+     */
+    static final long TRICKPLAY_FORWARD_DELTA_MS = 2500L;
+    static final long TRICKPLAY_BACK_DELTA_MS = 800L;
+    /** Cleared when playhead is within this of our skip seek target. */
+    static final long APP_SKIP_ARRIVAL_TOLERANCE_MS = 2500L;
+    static final long APP_SKIP_PENDING_TIMEOUT_MS = 8000L;
 
     @Override
     protected void onCreate(Bundle savedInstanceState)
@@ -178,7 +215,7 @@ public class Play extends AppCompatActivity
                     Uri.parse("package:" + getPackageName()));
             startActivity(intent);
             Toast.makeText(this,
-                    "Allow display over other apps for the Skip Intro/Credits button",
+                    getString(R.string.overlay_permission_toast),
                     Toast.LENGTH_LONG).show();
         }
         catch (Exception e)
@@ -200,21 +237,48 @@ public class Play extends AppCompatActivity
 
     private void resetSkipOverlayState()
     {
-        introOverlayDismissed = false;
-        creditOverlayDismissed = false;
-        introCountdownCancelled = false;
-        creditCountdownCancelled = false;
+        activeCreditIndex = -1;
+        introVisitDismissed = false;
+        introVisitSkipped = false;
+        creditVisitDismissed.clear();
+        creditVisitSkipped.clear();
+        wasInIntroVisit = false;
+        wasCreditVisitIndex = -1;
+        userSeekUnsettled = false;
+        pendingAppSkipTargetMs = -1;
+        pendingAppSkipSetAtWallMs = 0;
         if (skipOverlay != null)
         {
             skipOverlay.hide();
         }
     }
 
+    /** Loads credits markers from metadata and logs a safe diagnostic (no tokens). */
+    private void applyCreditMarkersFromMetadata(PlexApi.MetadataResult result)
+    {
+        creditStartMs = result.creditStartMs;
+        creditEndMs = result.creditEndMs;
+        creditSegments.clear();
+        creditVisitDismissed.clear();
+        creditVisitSkipped.clear();
+        activeCreditIndex = -1;
+        wasCreditVisitIndex = -1;
+        if (result.creditSegments != null)
+        {
+            creditSegments.addAll(result.creditSegments);
+        }
+        Log.d("Play", "Credits markers loaded: count=" + creditSegments.size()
+                + " segments=" + PlexApi.formatCreditSegmentsForLog(creditSegments)
+                + " earliestStart=" + creditStartMs + " earliestEnd=" + creditEndMs
+                + " durationMs=" + result.durationMs);
+    }
+
     private void handleOverlaySkipConfirmed(String segment)
     {
         if ("intro".equals(segment))
         {
-            introSkipArmed = false;
+            introVisitSkipped = true;
+            introVisitDismissed = false;
             if (introEndMs >= 0)
             {
                 seekZidoo(introEndMs);
@@ -222,11 +286,13 @@ public class Play extends AppCompatActivity
         }
         else if ("credits".equals(segment))
         {
-            creditSkipArmed = false;
-            if (creditEndMs >= 0)
+            int idx = activeCreditIndex;
+            if (idx < 0)
             {
-                seekZidoo(creditEndMs);
+                idx = findEligibleCreditSegmentIndex(lastPollPositionMs, creditSegments,
+                        suppressedCreditVisits());
             }
+            skipCreditsSegmentAt(idx, lastPollPositionMs);
         }
     }
 
@@ -234,28 +300,116 @@ public class Play extends AppCompatActivity
     {
         if ("intro".equals(segment))
         {
-            introOverlayDismissed = true;
-            introSkipArmed = false;
+            // Back cancels this visit only; leaving the intro window rearms.
+            introVisitDismissed = true;
+            Log.d("Play", "Intro dismissed (Back) for current visit only");
         }
         else if ("credits".equals(segment))
         {
-            creditOverlayDismissed = true;
-            creditSkipArmed = false;
+            int idx = activeCreditIndex;
+            if (idx < 0)
+            {
+                idx = findEligibleCreditSegmentIndex(lastPollPositionMs, creditSegments,
+                        suppressedCreditVisits());
+            }
+            if (idx >= 0)
+            {
+                creditVisitDismissed.add(idx);
+                Log.d("Play", "Credits segment " + idx
+                        + " dismissed (Back) for current visit; later visits/segments still eligible");
+            }
+            activeCreditIndex = -1;
         }
     }
 
     private void handleOverlayCountdownCancelled(String segment)
     {
-        if ("intro".equals(segment))
+        // Same visit-scoped cancel as Back dismiss.
+        handleOverlaySkipDismissed(segment);
+    }
+
+    private Set<Integer> suppressedCreditVisits()
+    {
+        Set<Integer> suppressed = new HashSet<>(creditVisitDismissed);
+        suppressed.addAll(creditVisitSkipped);
+        return suppressed;
+    }
+
+    /**
+     * Seeks past the current credits segment end. If that end is at/near true media
+     * duration, completes playback explicitly (watched sync + Up Next for TV).
+     */
+    private void skipCreditsSegmentAt(int index, long positionAtTriggerMs)
+    {
+        if (index < 0 || index >= creditSegments.size())
         {
-            introCountdownCancelled = true;
-            introSkipArmed = false;
+            Log.w("Play", "Credits skip ignored: no eligible segment (pos=" + positionAtTriggerMs + ")");
+            return;
         }
-        else if ("credits".equals(segment))
+        PlexApi.CreditSegment segment = creditSegments.get(index);
+        creditVisitSkipped.add(index);
+        creditVisitDismissed.remove(index);
+        activeCreditIndex = -1;
+        runOnUiThread(this::removeSkipOverlay);
+
+        long mediaDuration = durationMs > 0 ? durationMs
+                : (lastKnownDurationMs > 0 ? lastKnownDurationMs : 0);
+        Log.d("Play", "Credits skip: segment=" + index
+                + " start=" + segment.startMs + " end=" + segment.endMs
+                + " final=" + segment.isFinal
+                + " posAtTrigger=" + positionAtTriggerMs
+                + " durationMs=" + mediaDuration
+                + " all=" + PlexApi.formatCreditSegmentsForLog(creditSegments));
+
+        if (!isValidCreditSegment(segment.startMs, segment.endMs))
         {
-            creditCountdownCancelled = true;
-            creditSkipArmed = false;
+            Log.w("Play", "Credits skip aborted: invalid segment end; preserving playback");
+            return;
         }
+
+        if (isCreditsSeekAtMediaEnd(segment.endMs, mediaDuration))
+        {
+            // Genuine end of media — do not rely solely on seek-to-duration completing Zidoo.
+            triggerTrueMediaEndFromCredits(positionAtTriggerMs, segment.endMs, mediaDuration);
+        }
+        else
+        {
+            // Remaining content after this segment (mid/post-credit scenes).
+            seekZidoo(segment.endMs);
+        }
+    }
+
+    /**
+     * Closes Zidoo and runs the existing episode-complete path (scrobble at duration,
+     * then Up Next once for TV). Never marks watched solely because a credits marker
+     * was reached earlier mid-title.
+     */
+    private void triggerTrueMediaEndFromCredits(long positionAtTriggerMs, long seekEndMs,
+                                                long mediaDuration)
+    {
+        if (upNextTriggered || waitingForUpNext || handlingPlaybackResult)
+        {
+            Log.d("Play", "Credits end-of-media ignored (already completing)");
+            return;
+        }
+        Log.d("Play", "Credits seek at/near media end (pos=" + positionAtTriggerMs
+                + " seekEnd=" + seekEndMs + " duration=" + mediaDuration
+                + "); completing playback explicitly");
+        upNextTriggered = true;
+        stopProgressPoller();
+        runOnUiThread(() -> {
+            try
+            {
+                finishActivity(98);
+            }
+            catch (Exception e)
+            {
+                Log.w("Play", "Credits end-of-media: finishActivity failed: " + e.getMessage()
+                        + "; completing directly");
+                upNextTriggered = false;
+                handleEpisodeCompleted();
+            }
+        });
     }
 
     private void removeSkipOverlay()
@@ -378,6 +532,179 @@ public class Play extends AppCompatActivity
             hideAt = endMs;
         }
         return positionMs >= startMs && positionMs < hideAt;
+    }
+
+    static boolean isValidCreditSegment(long startMs, long endMs)
+    {
+        return startMs >= 0 && endMs > startMs;
+    }
+
+    /**
+     * True when a credits seek destination is at or within {@link #CREDITS_NEAR_MEDIA_END_MS}
+     * of media duration (true end). Invalid/missing duration → false (preserve playback).
+     */
+    static boolean isCreditsSeekAtMediaEnd(long seekEndMs, long durationMs)
+    {
+        if (durationMs <= 0 || seekEndMs < 0)
+        {
+            return false;
+        }
+        return seekEndMs >= durationMs - CREDITS_NEAR_MEDIA_END_MS;
+    }
+
+    /**
+     * First eligible credits segment containing {@code positionMs}, or -1.
+     * Visit-suppressed indices (dismissed/skipped for this visit) are ignored.
+     */
+    static int findEligibleCreditSegmentIndex(long positionMs,
+                                              List<PlexApi.CreditSegment> segments,
+                                              Set<Integer> suppressedVisitIndices)
+    {
+        if (segments == null || segments.isEmpty() || positionMs < 0)
+        {
+            return -1;
+        }
+        for (int i = 0; i < segments.size(); i++)
+        {
+            if (suppressedVisitIndices != null && suppressedVisitIndices.contains(i))
+            {
+                continue;
+            }
+            PlexApi.CreditSegment segment = segments.get(i);
+            if (!isValidCreditSegment(segment.startMs, segment.endMs))
+            {
+                continue;
+            }
+            if (isWithinSkipOverlayWindow(positionMs, segment.startMs, segment.endMs))
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Instant mode: first eligible segment whose start has been reached and whose end
+     * has not yet been passed.
+     */
+    static int findInstantCreditSegmentIndex(long positionMs,
+                                             List<PlexApi.CreditSegment> segments,
+                                             Set<Integer> suppressedVisitIndices)
+    {
+        if (segments == null || segments.isEmpty() || positionMs < 0)
+        {
+            return -1;
+        }
+        for (int i = 0; i < segments.size(); i++)
+        {
+            if (suppressedVisitIndices != null && suppressedVisitIndices.contains(i))
+            {
+                continue;
+            }
+            PlexApi.CreditSegment segment = segments.get(i);
+            if (!isValidCreditSegment(segment.startMs, segment.endMs))
+            {
+                continue;
+            }
+            if (positionMs >= segment.startMs && positionMs < segment.endMs)
+            {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** Credits segment containing position for visit tracking (overlay window), or -1. */
+    static int findCreditSegmentContaining(long positionMs, List<PlexApi.CreditSegment> segments)
+    {
+        return findEligibleCreditSegmentIndex(positionMs, segments, null);
+    }
+
+    /**
+     * True when the poll-to-poll delta looks like active user scrubbing / trick-play
+     * (not normal 1× progress). Used to hold skip UI without permanent disarm.
+     */
+    static boolean isLikelyUserSeekOrTrickPlay(long previousPositionMs, long currentPositionMs)
+    {
+        if (previousPositionMs < 0 || currentPositionMs < 0)
+        {
+            return false;
+        }
+        long delta = currentPositionMs - previousPositionMs;
+        if (delta < -SEEK_JUMP_BACK_MS || delta > SEEK_JUMP_FORWARD_MS)
+        {
+            return true;
+        }
+        return delta < -TRICKPLAY_BACK_DELTA_MS || delta > TRICKPLAY_FORWARD_DELTA_MS;
+    }
+
+    /**
+     * After a user seek jump, position has settled when Δ is within normal playback/jitter.
+     */
+    static boolean isSeekSettledDelta(long previousPositionMs, long currentPositionMs)
+    {
+        if (previousPositionMs < 0 || currentPositionMs < 0)
+        {
+            return true;
+        }
+        long delta = currentPositionMs - previousPositionMs;
+        return delta >= -TRICKPLAY_BACK_DELTA_MS && delta <= TRICKPLAY_FORWARD_DELTA_MS;
+    }
+
+    /**
+     * Whether our app skip seek has arrived (or timed out) so poll can resume normal arming.
+     */
+    static boolean isAppSkipSeekResolved(long pendingTargetMs, long pendingSetAtWallMs,
+                                         long currentPositionMs, long nowWallMs)
+    {
+        if (pendingTargetMs < 0)
+        {
+            return true;
+        }
+        if (pendingSetAtWallMs > 0 && nowWallMs - pendingSetAtWallMs >= APP_SKIP_PENDING_TIMEOUT_MS)
+        {
+            return true;
+        }
+        if (currentPositionMs < 0)
+        {
+            return false;
+        }
+        return Math.abs(currentPositionMs - pendingTargetMs) <= APP_SKIP_ARRIVAL_TOLERANCE_MS
+                || currentPositionMs >= pendingTargetMs;
+    }
+
+    /**
+     * When playhead leaves a marker visit, clear that visit's dismiss/skip so re-entry rearms.
+     * Returns updated [wasInIntro, wasCreditIndex] as a long pair encoded... actually use a small
+     * helper object via arrays for testability.
+     */
+    static void clearVisitSuppressionOnLeave(boolean nowInIntro, int nowCreditIndex,
+                                             boolean wasInIntro, int wasCreditIndex,
+                                             boolean[] introFlagsOut /* [dismissed, skipped] */,
+                                             Set<Integer> creditDismissed,
+                                             Set<Integer> creditSkipped)
+    {
+        if (wasInIntro && !nowInIntro && introFlagsOut != null && introFlagsOut.length >= 2)
+        {
+            introFlagsOut[0] = false;
+            introFlagsOut[1] = false;
+        }
+        if (wasCreditIndex >= 0 && wasCreditIndex != nowCreditIndex)
+        {
+            if (creditDismissed != null) creditDismissed.remove(wasCreditIndex);
+            if (creditSkipped != null) creditSkipped.remove(wasCreditIndex);
+        }
+    }
+
+    /** Intro is actionable when inside window and this visit was not dismissed/skipped. */
+    static boolean isIntroSkipEligible(long positionMs, long introStartMs, long introEndMs,
+                                       boolean visitDismissed, boolean visitSkipped)
+    {
+        if (visitDismissed || visitSkipped)
+        {
+            return false;
+        }
+        return isWithinSkipOverlayWindow(positionMs, introStartMs, introEndMs);
     }
 
     /**
@@ -760,8 +1087,7 @@ public class Play extends AppCompatActivity
                 metadataKey = result.metadataKey;
                 introStartMs = result.introStartMs;
                 introEndMs = result.introEndMs;
-                creditStartMs = result.creditStartMs;
-                creditEndMs = result.creditEndMs;
+                applyCreditMarkersFromMetadata(result);
 
                 if (result.isEpisode) {
                     seriesRatingKey = result.seriesRatingKey != null ? result.seriesRatingKey : "";
@@ -956,10 +1282,9 @@ public class Play extends AppCompatActivity
                                     plexRatingKey = "";
                                     metadataKey = "";
 
-                                    introSkipArmed = true;
-                                    creditSkipArmed = true;
                                     introStartMs = -1; introEndMs = -1;
                                     creditStartMs = -1; creditEndMs = -1;
+                                    creditSegments.clear();
                                     lastPollPositionMs = -1;
                                     runOnUiThread(this::resetSkipOverlayState);
 
@@ -983,8 +1308,7 @@ public class Play extends AppCompatActivity
                                                                 metadataKey = result.metadataKey;
                                                                 introStartMs = result.introStartMs;
                                                                 introEndMs = result.introEndMs;
-                                                                creditStartMs = result.creditStartMs;
-                                                                creditEndMs = result.creditEndMs;
+                                                                applyCreditMarkersFromMetadata(result);
                                                                 if (result.isEpisode) {
                                                                     seriesRatingKey = result.seriesRatingKey != null ? result.seriesRatingKey : "";
                                                                     seriesTitle = result.seriesTitle != null ? result.seriesTitle : "";
@@ -1078,25 +1402,50 @@ public class Play extends AppCompatActivity
                                     boolean skipCreditsEnabled = prefs.getBoolean("skip_credits", true);
                                     String skipBehavior = getSkipBehavior();
 
-                                    if (lastPollPositionMs >= 0) {
-                                        long positionDelta = currentPositionMs - lastPollPositionMs;
-                                        boolean likelyManualSeek = positionDelta < -3000 || positionDelta > 30000;
-
-                                        if (likelyManualSeek) {
-                                            if (introSkipArmed && currentPositionMs < introEndMs) {
-                                                introSkipArmed = false;
-                                                Log.d("Play", "Intro skip disarmed (manual seek to " + currentPositionMs + "ms)");
-                                            }
-                                            if (creditSkipArmed && currentPositionMs < creditStartMs) {
-                                                creditSkipArmed = false;
-                                                Log.d("Play", "Credit skip disarmed (manual seek to " + currentPositionMs + "ms)");
-                                            }
-                                            runOnUiThread(this::removeSkipOverlay);
-                                        }
+                                    long nowWallForSkip = System.currentTimeMillis();
+                                    if (pendingAppSkipTargetMs >= 0
+                                            && isAppSkipSeekResolved(pendingAppSkipTargetMs,
+                                            pendingAppSkipSetAtWallMs, currentPositionMs, nowWallForSkip)) {
+                                        Log.d("Play", "App skip seek resolved near "
+                                                + pendingAppSkipTargetMs + "ms (pos=" + currentPositionMs + ")");
+                                        pendingAppSkipTargetMs = -1;
+                                        pendingAppSkipSetAtWallMs = 0;
                                     }
 
-                                    handleSkipDuringPoll(currentPositionMs, skipIntrosEnabled, skipCreditsEnabled,
-                                            skipBehavior);
+                                    boolean appSkipInFlight = pendingAppSkipTargetMs >= 0;
+                                    if (!appSkipInFlight && lastPollPositionMs >= 0
+                                            && isLikelyUserSeekOrTrickPlay(lastPollPositionMs, currentPositionMs)) {
+                                        userSeekUnsettled = true;
+                                        activeCreditIndex = -1;
+                                        runOnUiThread(this::removeSkipOverlay);
+                                        Log.d("Play", "User seek/trick-play unsettled at pos="
+                                                + currentPositionMs + "ms (hold skip until settle)");
+                                    } else if (userSeekUnsettled && !appSkipInFlight
+                                            && isSeekSettledDelta(lastPollPositionMs, currentPositionMs)) {
+                                        userSeekUnsettled = false;
+                                        Log.d("Play", "Seek settled at pos=" + currentPositionMs
+                                                + "ms; position-based skip may rearm");
+                                    }
+
+                                    // Leave marker → clear visit dismiss/skip so later visits rearm.
+                                    boolean nowInIntroVisit = isWithinSkipOverlayWindow(
+                                            currentPositionMs, introStartMs, introEndMs);
+                                    int nowCreditVisit = findCreditSegmentContaining(
+                                            currentPositionMs, creditSegments);
+                                    boolean[] introVisitFlags = new boolean[]{
+                                            introVisitDismissed, introVisitSkipped};
+                                    clearVisitSuppressionOnLeave(nowInIntroVisit, nowCreditVisit,
+                                            wasInIntroVisit, wasCreditVisitIndex,
+                                            introVisitFlags, creditVisitDismissed, creditVisitSkipped);
+                                    introVisitDismissed = introVisitFlags[0];
+                                    introVisitSkipped = introVisitFlags[1];
+                                    wasInIntroVisit = nowInIntroVisit;
+                                    wasCreditVisitIndex = nowCreditVisit;
+
+                                    if (!userSeekUnsettled && !appSkipInFlight) {
+                                        handleSkipDuringPoll(currentPositionMs, skipIntrosEnabled,
+                                                skipCreditsEnabled, skipBehavior);
+                                    }
 
                                     lastPollPositionMs = currentPositionMs;
                                 } else if (!isZidooPlaybackActive(statusCode, statusText, nowPlayingPath, false)) {
@@ -1232,7 +1581,10 @@ public class Play extends AppCompatActivity
 
     /**
      * Intro/credits skip based on Settings "Skip Behavior".
-     * Instant keeps prior auto-seek / Up Next behavior. Manual and countdown use the overlay.
+     * Position-based: activates when the settled playhead is inside a valid marker
+     * (visit dismiss/skip only suppresses until the playhead leaves that marker).
+     * Credits: all modes seek past the <em>current</em> segment end (films and TV).
+     * Up Next is only a consequence of true media end after that seek — never binge-at-marker.
      */
     private void handleSkipDuringPoll(long currentPositionMs, boolean skipIntrosEnabled,
                                       boolean skipCreditsEnabled, String skipBehavior) {
@@ -1241,45 +1593,44 @@ public class Play extends AppCompatActivity
             return;
         }
 
-        boolean inIntro = skipIntrosEnabled && introSkipArmed && !introOverlayDismissed
-                && !introCountdownCancelled
-                && isWithinSkipOverlayWindow(currentPositionMs, introStartMs, introEndMs);
-        boolean inCreditsWindow = skipCreditsEnabled && creditSkipArmed && !creditOverlayDismissed
-                && !creditCountdownCancelled && creditStartMs >= 0
-                && isWithinSkipOverlayWindow(currentPositionMs, creditStartMs,
-                creditEndMs > creditStartMs ? creditEndMs : creditStartMs + 60000);
+        Set<Integer> suppressedCredits = suppressedCreditVisits();
+        boolean inIntro = skipIntrosEnabled
+                && isIntroSkipEligible(currentPositionMs, introStartMs, introEndMs,
+                introVisitDismissed, introVisitSkipped);
+        int eligibleCreditIndex = skipCreditsEnabled
+                ? findEligibleCreditSegmentIndex(currentPositionMs, creditSegments, suppressedCredits)
+                : -1;
+        boolean inCreditsWindow = eligibleCreditIndex >= 0;
 
-        // Instant auto-skip (existing behavior)
+        // Instant: auto-seek past current segment (no overlay). Same destination as Manual/Countdown.
         if (SKIP_BEHAVIOR_INSTANT.equals(skipBehavior)) {
             runOnUiThread(this::removeSkipOverlay);
 
-            if (skipIntrosEnabled && introSkipArmed && introStartMs >= 0
+            if (skipIntrosEnabled && !introVisitDismissed && !introVisitSkipped
+                    && introStartMs >= 0
                     && currentPositionMs >= introStartMs && currentPositionMs < introEndMs) {
                 Log.d("Play", "Skipping intro: seeking from " + currentPositionMs + "ms to " + introEndMs + "ms");
+                introVisitSkipped = true;
                 seekZidoo(introEndMs);
-                introSkipArmed = false;
             }
 
-            if (skipCreditsEnabled && creditSkipArmed && creditStartMs >= 0
-                    && !seriesRatingKey.isEmpty()
-                    && currentPositionMs >= creditStartMs
-                    && !upNextTriggered) {
-                Log.d("Play", "Credits reached at " + currentPositionMs + "ms, triggering Up Next");
-                upNextTriggered = true;
-                creditSkipArmed = false;
-                runOnUiThread(() -> {
-                    try {
-                        finishActivity(98);
-                    } catch (Exception e) {
-                        Log.w("Play", "Credit skip: finishActivity failed: " + e.getMessage());
-                    }
-                });
+            if (skipCreditsEnabled && !upNextTriggered) {
+                int instantIdx = findInstantCreditSegmentIndex(currentPositionMs, creditSegments,
+                        suppressedCredits);
+                if (instantIdx >= 0) {
+                    Log.d("Play", "Instant credits skip at pos=" + currentPositionMs
+                            + " segment=" + instantIdx);
+                    skipCreditsSegmentAt(instantIdx, currentPositionMs);
+                }
             }
             return;
         }
 
         // Past the marker window → hide overlay
         if (!inIntro && !inCreditsWindow) {
+            if (activeCreditIndex >= 0) {
+                activeCreditIndex = -1;
+            }
             runOnUiThread(this::removeSkipOverlay);
             return;
         }
@@ -1288,18 +1639,21 @@ public class Play extends AppCompatActivity
         final String segment = inIntro ? "intro" : "credits";
         final String label = inIntro ? "Skip Intro" : "Skip Credits";
         final String kindLabel = inIntro ? "Intro" : "Credits";
+        if (!inIntro && inCreditsWindow) {
+            activeCreditIndex = eligibleCreditIndex;
+        }
         final boolean overlayAllowed = SkipOverlay.canDrawOverlays(getApplicationContext());
 
         if (!overlayAllowed) {
-            // Without overlay permission, fall back to instant for this segment once
-            if (inIntro && introSkipArmed) {
+            // Without overlay permission, fall back to instant seek for this visit once
+            if (inIntro && !introVisitSkipped) {
                 Log.d("Play", "No overlay permission; instant-skipping intro");
+                introVisitSkipped = true;
                 seekZidoo(introEndMs);
-                introSkipArmed = false;
-            } else if (inCreditsWindow && creditSkipArmed && creditEndMs >= 0) {
-                Log.d("Play", "No overlay permission; instant-skipping credits");
-                seekZidoo(creditEndMs);
-                creditSkipArmed = false;
+            } else if (inCreditsWindow) {
+                Log.d("Play", "No overlay permission; instant-skipping credits segment "
+                        + eligibleCreditIndex);
+                skipCreditsSegmentAt(eligibleCreditIndex, currentPositionMs);
             }
             return;
         }
@@ -1379,10 +1733,9 @@ public class Play extends AppCompatActivity
                 currentPlayingPath = null;
                 upNextTriggered = false;
 
-                introSkipArmed = true;
-                creditSkipArmed = true;
                 introStartMs = -1; introEndMs = -1;
                 creditStartMs = -1; creditEndMs = -1;
+                creditSegments.clear();
                 lastPollPositionMs = -1;
                 lastTimelineReportMs = 0;
                 resetSkipOverlayState();
@@ -1400,8 +1753,7 @@ public class Play extends AppCompatActivity
                             metadataKey = result.metadataKey;
                             introStartMs = result.introStartMs;
                             introEndMs = result.introEndMs;
-                            creditStartMs = result.creditStartMs;
-                            creditEndMs = result.creditEndMs;
+                            applyCreditMarkersFromMetadata(result);
                             if (result.seasonRatingKey != null) seasonRatingKey = result.seasonRatingKey;
                             episodeIndex = result.episodeNumber;
 

@@ -46,6 +46,9 @@ public class PlexApiTest {
             assertEquals(90000, result.introEndMs);
             assertEquals(3300000, result.creditStartMs);
             assertEquals(3600000, result.creditEndMs);
+            assertEquals(1, result.creditSegments.size());
+            assertEquals(3300000, result.creditSegments.get(0).startMs);
+            assertEquals(3600000, result.creditSegments.get(0).endMs);
             assertEquals("1", result.seriesRatingKey);
             assertEquals("2", result.seasonRatingKey);
             assertEquals(3, result.episodeNumber);
@@ -123,5 +126,188 @@ public class PlexApiTest {
         assertEquals("2005", PlexApi.formatReleaseLabel("2005"));
         assertEquals("", PlexApi.formatReleaseLabel(""));
         assertEquals("", PlexApi.formatReleaseLabel(null));
+    }
+
+    @Test
+    public void looksLikeXml_detectsPmsDefault() {
+        assertTrue(PlexApi.looksLikeXml("<?xml version=\"1.0\"?><MediaContainer/>"));
+        assertTrue(PlexApi.looksLikeXml("  \n<MediaContainer size=\"1\"/>"));
+        assertFalse(PlexApi.looksLikeXml("{\"MediaContainer\":{}}"));
+        assertFalse(PlexApi.looksLikeXml(null));
+        assertFalse(PlexApi.looksLikeXml(""));
+        // HTML must not be treated as PMS XML (11.4 still failed on this).
+        assertFalse(PlexApi.looksLikeXml("<!DOCTYPE html><html><body>login</body></html>"));
+        assertFalse(PlexApi.looksLikeXml("<html lang=\"en\"><head></head></html>"));
+        assertTrue(PlexApi.looksLikeHtml("<!DOCTYPE html><html></html>"));
+    }
+
+    @Test
+    public void classifyBodyKind_bomAndHtml() {
+        assertEquals("xml", PlexApi.classifyBodyKind("\uFEFF<?xml version=\"1.0\"?><MediaContainer/>"));
+        assertEquals("json", PlexApi.classifyBodyKind("\uFEFF{\"MediaContainer\":{}}"));
+        assertEquals("html", PlexApi.classifyBodyKind("<!DOCTYPE html><html></html>"));
+        assertEquals("empty", PlexApi.classifyBodyKind("   "));
+    }
+
+    @Test
+    public void parseLibrarySections_htmlThrowsNotDomParse() {
+        try {
+            PlexApi.parseLibrarySections("<!DOCTYPE html><html><body>gate</body></html>");
+            fail("expected IllegalArgumentException for HTML");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage().contains("HTML"));
+        }
+    }
+
+    @Test
+    public void parseLibrarySections_xmlWithBom() {
+        String xml = "\uFEFF<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
+                + "<MediaContainer><Directory key=\"1\" type=\"movie\"/></MediaContainer>";
+        java.util.List<PlexApi.LibrarySection> sections = PlexApi.parseLibrarySections(xml);
+        assertEquals(1, sections.size());
+        assertEquals("1", sections.get(0).key);
+        assertEquals("movie", sections.get(0).type);
+    }
+
+    @Test
+    public void baseUrl_stripsPlexWebPath() {
+        assertEquals("http://192.0.2.10:32400",
+                PlexApi.baseUrl("http://192.0.2.10:32400/web"));
+        assertEquals("http://192.0.2.10:32400",
+                PlexApi.baseUrl("http://192.0.2.10:32400/web/"));
+        assertEquals("http://192.0.2.10:32400",
+                PlexApi.baseUrl("http://192.0.2.10:32400/web/index.html"));
+        assertEquals("http://192.0.2.10:32400",
+                PlexApi.baseUrl("http://192.0.2.10:32400/"));
+    }
+
+    @Test
+    public void urlWithQueryToken_addsOnceAndSafeLogStripsQuery() {
+        String with = PlexApi.urlWithQueryToken("http://host:32400/library/sections", "secret-token");
+        assertTrue(with.contains("X-Plex-Token=secret-token"));
+        assertEquals(with, PlexApi.urlWithQueryToken(with, "secret-token"));
+        String logged = PlexApi.safeUrlForLog(with);
+        assertFalse(logged.contains("secret-token"));
+        assertTrue(logged.contains("/library/sections"));
+    }
+
+    @Test
+    public void parseLibrarySections_jsonArray() {
+        String json = "{\"MediaContainer\":{\"Directory\":["
+                + "{\"key\":\"1\",\"type\":\"movie\",\"title\":\"Movies\"},"
+                + "{\"key\":\"2\",\"type\":\"show\",\"title\":\"TV\"},"
+                + "{\"key\":\"3\",\"type\":\"artist\",\"title\":\"Music\"}"
+                + "]}}";
+        java.util.List<PlexApi.LibrarySection> sections = PlexApi.parseLibrarySections(json);
+        assertEquals(3, sections.size());
+        assertEquals("1", sections.get(0).key);
+        assertEquals("movie", sections.get(0).type);
+        assertEquals("show", sections.get(1).type);
+        assertEquals("artist", sections.get(2).type);
+    }
+
+    @Test
+    public void parseLibrarySections_jsonSingleObjectNotArray() {
+        // PMS emits a bare object when there is exactly one Directory.
+        String json = "{\"MediaContainer\":{\"Directory\":"
+                + "{\"key\":\"9\",\"type\":\"movie\",\"title\":\"Only Movies\"}}}";
+        java.util.List<PlexApi.LibrarySection> sections = PlexApi.parseLibrarySections(json);
+        assertEquals(1, sections.size());
+        assertEquals("9", sections.get(0).key);
+        assertEquals("movie", sections.get(0).type);
+    }
+
+    @Test
+    public void parseLibrarySections_xmlWhenAcceptJsonIgnored() {
+        String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                + "<MediaContainer size=\"2\">"
+                + "<Directory key=\"1\" type=\"movie\" title=\"Movies\">"
+                + "<Location id=\"1\" path=\"/data/movies\"/>"
+                + "</Directory>"
+                + "<Directory key=\"2\" type=\"show\" title=\"TV Shows\"/>"
+                + "</MediaContainer>";
+        java.util.List<PlexApi.LibrarySection> sections = PlexApi.parseLibrarySections(xml);
+        assertEquals(2, sections.size());
+        assertEquals("1", sections.get(0).key);
+        assertEquals("movie", sections.get(0).type);
+        assertEquals("2", sections.get(1).key);
+        assertEquals("show", sections.get(1).type);
+    }
+
+    @Test
+    public void parseScreensaverItems_xmlVideoAndShowDirectory() {
+        String xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                + "<MediaContainer size=\"2\">"
+                + "<Video ratingKey=\"10\" type=\"movie\" title=\"Film\""
+                + " art=\"/library/metadata/10/art/1\""
+                + " originallyAvailableAt=\"1999-03-31\">"
+                + "<Image type=\"clearLogo\" url=\"/library/metadata/10/clearLogo\"/>"
+                + "</Video>"
+                + "<Directory ratingKey=\"20\" type=\"show\" title=\"Series\""
+                + " art=\"/library/metadata/20/art/2\" year=\"2005\"/>"
+                + "<Video ratingKey=\"30\" type=\"episode\" title=\"Ep\""
+                + " art=\"/library/metadata/30/art/3\"/>"
+                + "</MediaContainer>";
+        java.util.List<PlexApi.ScreensaverItem> items = PlexApi.parseScreensaverItems(xml);
+        assertEquals(2, items.size());
+        assertEquals("10", items.get(0).ratingKey);
+        assertTrue(items.get(0).hasTransparentLogo());
+        assertEquals("1999-03-31", items.get(0).originallyAvailableAt);
+        assertEquals("20", items.get(1).ratingKey);
+        assertEquals("2005", items.get(1).originallyAvailableAt);
+    }
+
+    @Test
+    public void parseScreensaverItems_jsonSingleMetadataObject() {
+        String json = "{\"MediaContainer\":{\"Metadata\":"
+                + "{\"ratingKey\":\"7\",\"type\":\"movie\",\"title\":\"Solo\","
+                + "\"art\":\"/library/metadata/7/art/1\",\"year\":2020}}}";
+        java.util.List<PlexApi.ScreensaverItem> items = PlexApi.parseScreensaverItems(json);
+        assertEquals(1, items.size());
+        assertEquals("7", items.get(0).ratingKey);
+        assertEquals("2020", items.get(0).originallyAvailableAt);
+    }
+
+    @Test
+    public void memberAsArray_wrapsSingleObject() {
+        com.google.gson.JsonObject root = com.google.gson.JsonParser.parseString(
+                "{\"Directory\":{\"key\":\"1\",\"type\":\"movie\"}}").getAsJsonObject();
+        com.google.gson.JsonArray arr = PlexApi.memberAsArray(root, "Directory");
+        assertEquals(1, arr.size());
+        assertEquals("1", arr.get(0).getAsJsonObject().get("key").getAsString());
+        assertEquals(0, PlexApi.memberAsArray(root, "Missing").size());
+    }
+
+    @Test
+    public void suggestAppendDefaultPlexPort_bareLanOnly() {
+        assertEquals("http://192.168.1.10:32400",
+                PlexApi.suggestAppendDefaultPlexPort("http://192.168.1.10"));
+        assertEquals("http://10.0.0.5:32400",
+                PlexApi.suggestAppendDefaultPlexPort("http://10.0.0.5/"));
+        assertEquals("http://nas.local:32400",
+                PlexApi.suggestAppendDefaultPlexPort("http://nas.local"));
+        assertEquals("http://plexbox:32400",
+                PlexApi.suggestAppendDefaultPlexPort("http://plexbox"));
+        // Already has default port — no rewrite.
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("http://192.168.1.10:32400"));
+        // Custom port — never rewrite.
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("http://192.168.1.10:8080"));
+        // Public / reverse-proxy style — never rewrite.
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("https://plex.example.com"));
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("https://plex.example.com:443"));
+        assertNull(PlexApi.suggestAppendDefaultPlexPort("http://192.168.1.10/plex"));
+        assertNull(PlexApi.suggestAppendDefaultPlexPort(""));
+        assertNull(PlexApi.suggestAppendDefaultPlexPort(null));
+    }
+
+    @Test
+    public void hasExplicitPort_andPrivateIpv4() {
+        assertTrue(PlexApi.hasExplicitPort("http://192.168.1.10:32400", "192.168.1.10"));
+        assertFalse(PlexApi.hasExplicitPort("http://192.168.1.10", "192.168.1.10"));
+        assertTrue(PlexApi.isPrivateIpv4("192.168.0.1"));
+        assertTrue(PlexApi.isPrivateIpv4("172.16.5.1"));
+        assertFalse(PlexApi.isPrivateIpv4("8.8.8.8"));
+        assertFalse(PlexApi.isLanPlexHost("plex.tv"));
+        assertTrue(PlexApi.isLanPlexHost("192.168.1.1"));
     }
 }

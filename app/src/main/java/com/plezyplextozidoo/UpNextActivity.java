@@ -73,8 +73,9 @@ public class UpNextActivity extends AppCompatActivity {
         AppCompatButton btnCancel = findViewById(R.id.btnCancel);
 
         // Material themes tint AppCompatButton via colorPrimary — clear so mono drawable shows.
-        btnPlayNow.setSupportBackgroundTintList(null);
-        btnCancel.setSupportBackgroundTintList(null);
+        // Use public setBackgroundTintList (minSdk 28); avoid RestrictedApi support API.
+        btnPlayNow.setBackgroundTintList(null);
+        btnCancel.setBackgroundTintList(null);
         btnPlayNow.setBackgroundResource(R.drawable.btn_tv_focus);
         btnCancel.setBackgroundResource(R.drawable.btn_tv_focus);
 

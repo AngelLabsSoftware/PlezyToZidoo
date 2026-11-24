@@ -158,7 +158,8 @@ public class SettingsActivity extends AppCompatActivity {
 
     private void clearTint(AppCompatButton... buttons) {
         for (AppCompatButton b : buttons) {
-            b.setSupportBackgroundTintList(null);
+            // Public API (minSdk 28) — avoids RestrictedApi on setSupportBackgroundTintList.
+            b.setBackgroundTintList(null);
             b.setBackgroundResource(R.drawable.btn_tv_focus);
         }
     }

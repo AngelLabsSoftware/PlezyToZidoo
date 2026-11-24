@@ -215,7 +215,7 @@ public class Play extends AppCompatActivity
                     Uri.parse("package:" + getPackageName()));
             startActivity(intent);
             Toast.makeText(this,
-                    "Allow display over other apps for the Skip Intro/Credits button",
+                    getString(R.string.overlay_permission_toast),
                     Toast.LENGTH_LONG).show();
         }
         catch (Exception e)

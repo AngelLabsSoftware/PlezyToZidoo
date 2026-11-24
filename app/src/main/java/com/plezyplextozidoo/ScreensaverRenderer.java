@@ -8,10 +8,14 @@ import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Log;
 import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.animation.LinearInterpolator;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 
 import androidx.annotation.Nullable;
@@ -46,19 +50,22 @@ public final class ScreensaverRenderer {
      */
     static final float KEN_BURNS_END_SCALE = 1.05f;
 
-    /** Pref value: reduced logo (~25% of prior layout size). Default. */
+    /** Pref: max 25% viewport width, left-aligned. */
     static final String LOGO_SIZE_SMALL = "small";
-    /** Pref value: clearLogo at native file/pixel size. */
+    /** Pref: max 50% viewport width, left-aligned. Default. */
+    static final String LOGO_SIZE_MEDIUM = "medium";
+    /** Pref: max 80% viewport width, horizontally centred (≥10% side padding). */
+    static final String LOGO_SIZE_LARGE = "large";
+    /** Legacy pref value from 11.7 — treated as Large. */
     static final String LOGO_SIZE_ORIGINAL = "original";
 
-    /**
-     * Small logo: height was 120dp; target ~25% → 30dp. Max width was 720dp → 180dp.
-     * Also capped as a fraction of the screen; never upscaled past native pixels.
-     */
-    static final float LOGO_HEIGHT_DP = 30f;
-    static final float LOGO_MAX_WIDTH_DP = 180f;
-    static final float LOGO_MAX_SCREEN_WIDTH_FRAC = 0.18f;
-    static final float LOGO_MAX_SCREEN_HEIGHT_FRAC = 0.08f;
+    static final float LOGO_WIDTH_FRAC_SMALL = 0.25f;
+    static final float LOGO_WIDTH_FRAC_MEDIUM = 0.50f;
+    static final float LOGO_WIDTH_FRAC_LARGE = 0.80f;
+    /** Cap tall logos; never upscale past native. */
+    static final float LOGO_MAX_HEIGHT_FRAC = 0.22f;
+    static final float LOGO_SIDE_PAD_FRAC_LARGE = 0.10f;
+    static final float OVERLAY_EDGE_PAD_DP = 48f;
 
     private final Context appContext;
     private final View root;
@@ -68,6 +75,8 @@ public final class ScreensaverRenderer {
     private final TextView titleView;
     private final TextView dateView;
     private final TextView statusView;
+    private final ProgressBar spinnerView;
+    private final View overlayView;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final List<PlexApi.ScreensaverItem> playlist = new ArrayList<>();
@@ -82,8 +91,8 @@ public final class ScreensaverRenderer {
     /** When false (default), skip titles without a usable clearLogo. */
     private boolean allowTextTitle;
     private boolean showDate;
-    /** {@link #LOGO_SIZE_SMALL} or {@link #LOGO_SIZE_ORIGINAL}. */
-    private String logoSize = LOGO_SIZE_SMALL;
+    /** {@link #LOGO_SIZE_SMALL}, {@link #LOGO_SIZE_MEDIUM}, or {@link #LOGO_SIZE_LARGE}. */
+    private String logoSize = LOGO_SIZE_MEDIUM;
     private long intervalMs = DEFAULT_INTERVAL_MS;
 
     private final Runnable advanceRunnable = this::advance;
@@ -98,11 +107,14 @@ public final class ScreensaverRenderer {
         this.titleView = root.findViewById(R.id.screensaver_title);
         this.dateView = root.findViewById(R.id.screensaver_date);
         this.statusView = root.findViewById(R.id.screensaver_status);
+        this.spinnerView = root.findViewById(R.id.screensaver_spinner);
+        this.overlayView = root.findViewById(R.id.screensaver_overlay);
     }
 
     private void retryPlaylistLater() {
         if (!running.get() || playlist.isEmpty()) return;
-        statusView.setVisibility(View.GONE);
+        hideStatusKeepSpinner(false);
+        showLoadingSpinner();
         tryShowAt(0, 0);
     }
 
@@ -111,7 +123,7 @@ public final class ScreensaverRenderer {
             return;
         }
         loadPrefs();
-        status("Loading Plex artwork…");
+        showLoadingSpinner();
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(appContext);
         serverUrl = prefs.getString("plex_server_url", "");
         token = SecureStorage.getInstance(appContext).getString("plex_access_token", "");
@@ -134,7 +146,8 @@ public final class ScreensaverRenderer {
                 playlist.clear();
                 playlist.addAll(items);
                 index = 0;
-                statusView.setVisibility(View.GONE);
+                // Keep spinner until first bg+logo (or text) is ready — hideStatus only after commit.
+                showLoadingSpinner();
                 showCurrentThenSchedule();
             }
 
@@ -156,6 +169,7 @@ public final class ScreensaverRenderer {
             titleView.animate().cancel();
             titleView.setVisibility(View.GONE);
         }
+        hideLoadingSpinner();
         try {
             Glide.with(appContext).clear(artView);
             Glide.with(appContext).clear(artNextView);
@@ -171,7 +185,7 @@ public final class ScreensaverRenderer {
         showLogo = prefs.getBoolean("screensaver_show_logo", true);
         allowTextTitle = prefs.getBoolean("screensaver_allow_text_title", false);
         showDate = prefs.getBoolean("screensaver_show_date", true);
-        logoSize = normalizeLogoSize(prefs.getString("screensaver_logo_size", LOGO_SIZE_SMALL));
+        logoSize = normalizeLogoSize(prefs.getString("screensaver_logo_size", LOGO_SIZE_MEDIUM));
         int seconds = 20;
         try {
             seconds = Integer.parseInt(prefs.getString("screensaver_interval_sec", "20"));
@@ -181,10 +195,25 @@ public final class ScreensaverRenderer {
     }
 
     static String normalizeLogoSize(@Nullable String value) {
-        if (LOGO_SIZE_ORIGINAL.equals(value)) {
-            return LOGO_SIZE_ORIGINAL;
+        if (LOGO_SIZE_SMALL.equals(value)) {
+            return LOGO_SIZE_SMALL;
         }
-        return LOGO_SIZE_SMALL;
+        if (LOGO_SIZE_LARGE.equals(value) || LOGO_SIZE_ORIGINAL.equals(value)) {
+            // Legacy "original" maps to Large (widest / centred).
+            return LOGO_SIZE_LARGE;
+        }
+        return LOGO_SIZE_MEDIUM;
+    }
+
+    static float logoWidthFraction(@Nullable String sizeMode) {
+        String mode = normalizeLogoSize(sizeMode);
+        if (LOGO_SIZE_SMALL.equals(mode)) return LOGO_WIDTH_FRAC_SMALL;
+        if (LOGO_SIZE_LARGE.equals(mode)) return LOGO_WIDTH_FRAC_LARGE;
+        return LOGO_WIDTH_FRAC_MEDIUM;
+    }
+
+    static boolean isLogoCentered(@Nullable String sizeMode) {
+        return LOGO_SIZE_LARGE.equals(normalizeLogoSize(sizeMode));
     }
 
     /**
@@ -325,10 +354,8 @@ public final class ScreensaverRenderer {
         RequestOptions logoOpts = new RequestOptions()
                 .fitCenter()
                 .diskCacheStrategy(DiskCacheStrategy.NONE)
-                .skipMemoryCache(false);
-        if (LOGO_SIZE_SMALL.equals(logoSize)) {
-            logoOpts = logoOpts.override(max[0], max[1]);
-        }
+                .skipMemoryCache(false)
+                .override(max[0], max[1]);
         Glide.with(appContext)
                 .load(logoUrl)
                 .apply(logoOpts)
@@ -437,6 +464,8 @@ public final class ScreensaverRenderer {
             titleView.setVisibility(View.GONE);
         }
 
+        applyOverlayAlignment(logoSize);
+
         if (decodedLogo != null && showLogo) {
             logoView.setVisibility(View.VISIBLE);
             logoView.setAlpha(0f);
@@ -455,8 +484,9 @@ public final class ScreensaverRenderer {
             }
             if (useTextTitle && titleView != null
                     && item.title != null && !item.title.trim().isEmpty()) {
-                // Understated white text title — only when fallback is enabled.
+                // Understated white text — same width/alignment rules as logos.
                 titleView.setText(item.title.trim());
+                applyTitleSize(titleView, logoSize);
                 titleView.setAlpha(0f);
                 titleView.setVisibility(View.VISIBLE);
                 titleView.animate().alpha(1f).setDuration(CROSSFADE_MS).start();
@@ -473,6 +503,12 @@ public final class ScreensaverRenderer {
             }
         } else {
             dateView.setVisibility(View.GONE);
+        }
+
+        // First successful slide: hide spinner (no loading text).
+        hideLoadingSpinner();
+        if (statusView != null) {
+            statusView.setVisibility(View.GONE);
         }
     }
 
@@ -532,50 +568,54 @@ public final class ScreensaverRenderer {
     }
 
     /**
-     * Display size for a logo: native pixels when {@link #LOGO_SIZE_ORIGINAL}, otherwise
-     * fitted into the max box. Never upscales past intrinsic size.
+     * Display size for a logo fitted into the max box for the size mode.
+     * Never upscales past intrinsic size.
      */
     static int[] resolveLogoDisplaySize(int intrinsicW, int intrinsicH, int maxW, int maxH,
                                         @Nullable String sizeMode) {
         if (intrinsicW <= 0 || intrinsicH <= 0) {
             return new int[]{0, 0};
         }
-        if (LOGO_SIZE_ORIGINAL.equals(normalizeLogoSize(sizeMode))) {
-            // Native file/pixel size; only shrink if larger than the available screen box.
-            if (maxW <= 0 || maxH <= 0) {
-                return new int[]{intrinsicW, intrinsicH};
-            }
-            if (intrinsicW <= maxW && intrinsicH <= maxH) {
-                return new int[]{intrinsicW, intrinsicH};
-            }
-            return fittedLogoSize(intrinsicW, intrinsicH, maxW, maxH);
-        }
         return fittedLogoSize(intrinsicW, intrinsicH, maxW, maxH);
     }
 
     /**
-     * Max logo box in px. Small: density + screen-fraction caps (~25% of prior 120×720dp).
-     * Original: full screen bounds (native pixels applied in {@link #resolveLogoDisplaySize}).
+     * Max logo box in px from viewport width fraction + height cap + Large side padding.
      */
     static int[] logoMaxPx(View root, @Nullable String sizeMode) {
         DisplayMetrics dm = root.getResources().getDisplayMetrics();
         int screenW = root.getWidth() > 0 ? root.getWidth() : dm.widthPixels;
         int screenH = root.getHeight() > 0 ? root.getHeight() : dm.heightPixels;
-        if (LOGO_SIZE_ORIGINAL.equals(normalizeLogoSize(sizeMode))) {
-            return new int[]{Math.max(1, screenW), Math.max(1, screenH)};
+        String mode = normalizeLogoSize(sizeMode);
+        float widthFrac = logoWidthFraction(mode);
+        int maxW = Math.round(screenW * widthFrac);
+        if (LOGO_SIZE_LARGE.equals(mode)) {
+            // Enforce ≥10% side padding when centred.
+            int padCap = Math.round(screenW * (1f - 2f * LOGO_SIDE_PAD_FRAC_LARGE));
+            maxW = Math.min(maxW, padCap);
         }
-        int fromDpW = Math.round(TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, LOGO_MAX_WIDTH_DP, dm));
-        int fromDpH = Math.round(TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, LOGO_HEIGHT_DP, dm));
-        int maxW = Math.min(fromDpW, Math.round(screenW * LOGO_MAX_SCREEN_WIDTH_FRAC));
-        int maxH = Math.min(fromDpH, Math.round(screenH * LOGO_MAX_SCREEN_HEIGHT_FRAC));
+        int maxH = Math.round(screenH * LOGO_MAX_HEIGHT_FRAC);
         return new int[]{Math.max(1, maxW), Math.max(1, maxH)};
     }
 
-    /** @deprecated Prefer {@link #logoMaxPx(View, String)}; defaults to small. */
+    /** @deprecated Prefer {@link #logoMaxPx(View, String)}; defaults to medium. */
     static int[] logoMaxPx(View root) {
-        return logoMaxPx(root, LOGO_SIZE_SMALL);
+        return logoMaxPx(root, LOGO_SIZE_MEDIUM);
+    }
+
+    private void applyOverlayAlignment(@Nullable String sizeMode) {
+        if (overlayView == null) return;
+        boolean center = isLogoCentered(sizeMode);
+        if (overlayView instanceof LinearLayout) {
+            LinearLayout ll = (LinearLayout) overlayView;
+            ll.setGravity(center ? Gravity.CENTER_HORIZONTAL : Gravity.START);
+        }
+        ViewGroup.LayoutParams lp = overlayView.getLayoutParams();
+        if (lp instanceof FrameLayout.LayoutParams) {
+            FrameLayout.LayoutParams flp = (FrameLayout.LayoutParams) lp;
+            flp.gravity = Gravity.BOTTOM | (center ? Gravity.CENTER_HORIZONTAL : Gravity.START);
+            overlayView.setLayoutParams(flp);
+        }
     }
 
     private static void applyLogoSize(ImageView logoView, Drawable resource, int maxW, int maxH,
@@ -589,8 +629,19 @@ public final class ScreensaverRenderer {
         lp.width = size[0];
         lp.height = size[1];
         logoView.setLayoutParams(lp);
-        logoView.setScaleType(ImageView.ScaleType.FIT_START);
+        boolean center = isLogoCentered(sizeMode);
+        logoView.setScaleType(center ? ImageView.ScaleType.FIT_CENTER : ImageView.ScaleType.FIT_START);
         logoView.setAdjustViewBounds(true);
+    }
+
+    private void applyTitleSize(TextView titleView, @Nullable String sizeMode) {
+        if (titleView == null) return;
+        int[] max = logoMaxPx(root, sizeMode);
+        titleView.setMaxWidth(max[0]);
+        titleView.setGravity(isLogoCentered(sizeMode) ? Gravity.CENTER_HORIZONTAL : Gravity.START);
+        float sp = LOGO_SIZE_SMALL.equals(normalizeLogoSize(sizeMode)) ? 20f
+                : (LOGO_SIZE_LARGE.equals(normalizeLogoSize(sizeMode)) ? 28f : 24f);
+        titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
     }
 
     private void preloadNext() {
@@ -632,15 +683,10 @@ public final class ScreensaverRenderer {
                         String logoUrl = PlexApi.buildImageUrl(serverUrl, item.logoPath, token);
                         int[] max = logoMaxPx(root, logoSize);
                         RequestOptions logoOpts = new RequestOptions()
-                                .diskCacheStrategy(DiskCacheStrategy.NONE);
-                        if (LOGO_SIZE_SMALL.equals(logoSize)) {
-                            logoOpts = logoOpts.override(max[0], max[1]);
-                            Glide.with(appContext).load(logoUrl).apply(logoOpts)
-                                    .preload(max[0], max[1]);
-                        } else {
-                            // Original: preload at native size (no forced downscale override).
-                            Glide.with(appContext).load(logoUrl).apply(logoOpts).preload();
-                        }
+                                .diskCacheStrategy(DiskCacheStrategy.NONE)
+                                .override(max[0], max[1]);
+                        Glide.with(appContext).load(logoUrl).apply(logoOpts)
+                                .preload(max[0], max[1]);
                     }
                 });
             }
@@ -652,11 +698,38 @@ public final class ScreensaverRenderer {
         });
     }
 
-    private void status(@Nullable String message) {
-        if (message == null || message.isEmpty()) {
+    private void showLoadingSpinner() {
+        if (spinnerView != null) {
+            spinnerView.setVisibility(View.VISIBLE);
+        }
+        if (statusView != null) {
             statusView.setVisibility(View.GONE);
+        }
+    }
+
+    private void hideLoadingSpinner() {
+        if (spinnerView != null) {
+            spinnerView.setVisibility(View.GONE);
+        }
+    }
+
+    private void hideStatusKeepSpinner(boolean keepSpinner) {
+        if (statusView != null) {
+            statusView.setVisibility(View.GONE);
+        }
+        if (!keepSpinner) {
+            hideLoadingSpinner();
+        }
+    }
+
+    /** Real errors only — never a “loading…” label (spinner covers that). */
+    private void status(@Nullable String message) {
+        hideLoadingSpinner();
+        if (message == null || message.isEmpty()) {
+            if (statusView != null) statusView.setVisibility(View.GONE);
             return;
         }
+        if (statusView == null) return;
         statusView.setText(message);
         statusView.setVisibility(View.VISIBLE);
     }

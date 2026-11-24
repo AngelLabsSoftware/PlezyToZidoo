@@ -209,7 +209,7 @@
             android:summary="@string/screensaver_allow_text_title_summary" />
 
         <ListPreference
-            android:defaultValue="small"
+            android:defaultValue="medium"
             android:key="screensaver_logo_size"
             android:title="@string/screensaver_logo_size_title"
             android:summary="@string/screensaver_logo_size_summary"

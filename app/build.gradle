@@ -12,8 +12,8 @@ android {
         applicationId "com.plezyplextozidoo"
         minSdkVersion 28
         targetSdkVersion 28
-        versionCode 20261130
-        versionName "2026.11.9"
+        versionCode 20261131
+        versionName "2026.11.10"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 

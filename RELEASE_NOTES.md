@@ -1,5 +1,15 @@
 # Release notes
 
+## 2026.11.10 — UI polish + README
+
+- **Screensaver logos:** Small (25% left), Medium (50% left, default), Large (80% centred with ≥10% side padding); never upscale past native; tall-logo height cap.
+- **Loading:** thin circular spinner on black (no “Loading…” text); errors still shown.
+- **Up Next + Skip:** monochrome TV focus (black/white focused, pale grey/dark text unfocused, small corner radius — no pink/pills); centred Up Next composition with larger preview.
+- **Overlay permission copy:** Zidoo-accurate first-play side-panel steps (distinct from screensaver settings).
+- **README:** Adam’s full replacement.
+- Keeps 11.9 seek-rearm skip + 11.8 multi-segment credits / true-end Up Next / logo-required screensaver.
+- Version `2026.11.10` / `versionCode` `20261131`.
+
 ## 2026.11.9 — Seek rearm for Skip Intro/Credits
 
 - Skip Intro/Credits are **position-based**: after FF/RW/chapter/manual seek or resume settles inside a marker, the configured mode activates.

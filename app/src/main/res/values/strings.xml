@@ -19,7 +19,8 @@
     <string name="skip_behavior_title">Skip Behavior</string>
     <string name="skip_behavior_summary">Manual button (default), countdown, or instant auto-skip</string>
     <string name="overlay_permission_title">Allow Skip overlay</string>
-    <string name="overlay_permission_summary">Required for Skip Intro/Credits button over the Zidoo player</string>
+    <string name="overlay_permission_summary">Required for Skip Intro/Credits over the Zidoo player. On first play after install: Android settings side panel → scroll the app list → PlezyPlexToZidoo → allow display over other apps. This is separate from Settings → Display → Screensaver.</string>
+    <string name="overlay_permission_toast">On first play: Android settings side panel → scroll app list → PlezyPlexToZidoo → allow display over other apps (not the screensaver setting).</string>
     <string name="path_sub_hint_title">Path tip</string>
     <string name="path_sub_hint_summary">On this Z9X, a working substitution is /media/ → /data/</string>
     <!-- Plex Preferences -->
@@ -75,7 +76,7 @@
     <string name="screensaver_allow_text_title_title">Allow text title fallback</string>
     <string name="screensaver_allow_text_title_summary">Off by default. When on, titles without a clearLogo may show as understated white text.</string>
     <string name="screensaver_logo_size_title">Logo size</string>
-    <string name="screensaver_logo_size_summary">Small is ~25% of prior size; Original Size uses the clearLogo file pixels</string>
+    <string name="screensaver_logo_size_summary" formatted="false">Small 25% left, Medium 50% left (default), Large 80% centred — never upscaled past native</string>
     <string name="screensaver_show_date_title">Show original release year</string>
     <string name="screensaver_show_date_summary">From Plex originallyAvailableAt / year</string>
     <string name="screensaver_preview_title">Preview screensaver</string>

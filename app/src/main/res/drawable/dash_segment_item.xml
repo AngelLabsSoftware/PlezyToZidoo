@@ -1,29 +1,101 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Fixed outer insets so focus/selection never shifts layout. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Selected + focused: white outer ring, dark gap, white body -->
     <item android:state_selected="true" android:state_focused="true">
-        <shape android:shape="rectangle">
-            <solid android:color="@color/dash_segment_selected_bg" />
-            <corners android:radius="8dp" />
-            <stroke android:width="2dp" android:color="@color/dash_focus_stroke" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/dash_focus_stroke" />
+                    <corners android:radius="10dp" />
+                </shape>
+            </item>
+            <item
+                android:bottom="3dp"
+                android:left="3dp"
+                android:right="3dp"
+                android:top="3dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/dash_focus_gap" />
+                    <corners android:radius="8dp" />
+                </shape>
+            </item>
+            <item
+                android:bottom="5dp"
+                android:left="5dp"
+                android:right="5dp"
+                android:top="5dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/dash_segment_selected_bg" />
+                    <corners android:radius="6dp" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
+
+    <!-- Selected (unfocused): white body, same insets -->
     <item android:state_selected="true">
-        <shape android:shape="rectangle">
-            <solid android:color="@color/dash_segment_selected_bg" />
-            <corners android:radius="8dp" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/transparent" />
+                    <corners android:radius="10dp" />
+                </shape>
+            </item>
+            <item
+                android:bottom="5dp"
+                android:left="5dp"
+                android:right="5dp"
+                android:top="5dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/dash_segment_selected_bg" />
+                    <corners android:radius="6dp" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
+
+    <!-- Focused unselected: lighter grey + prominent white outline -->
     <item android:state_focused="true">
-        <shape android:shape="rectangle">
-            <solid android:color="@color/dash_segment_bg" />
-            <corners android:radius="8dp" />
-            <stroke android:width="2dp" android:color="@color/dash_focus_stroke" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/dash_focus_stroke" />
+                    <corners android:radius="10dp" />
+                </shape>
+            </item>
+            <item
+                android:bottom="3dp"
+                android:left="3dp"
+                android:right="3dp"
+                android:top="3dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/dash_segment_focused_bg" />
+                    <corners android:radius="7dp" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
+
+    <!-- Unselected -->
     <item>
-        <shape android:shape="rectangle">
-            <solid android:color="@color/dash_segment_bg" />
-            <corners android:radius="8dp" />
-        </shape>
+        <layer-list>
+            <item>
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/transparent" />
+                    <corners android:radius="10dp" />
+                </shape>
+            </item>
+            <item
+                android:bottom="5dp"
+                android:left="5dp"
+                android:right="5dp"
+                android:top="5dp">
+                <shape android:shape="rectangle">
+                    <solid android:color="@color/dash_segment_bg" />
+                    <corners android:radius="6dp" />
+                </shape>
+            </item>
+        </layer-list>
     </item>
 </selector>

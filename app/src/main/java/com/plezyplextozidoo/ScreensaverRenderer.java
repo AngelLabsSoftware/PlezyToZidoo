@@ -42,7 +42,11 @@ public final class ScreensaverRenderer {
     private static final String TAG = "ScreensaverRenderer";
     private static final long DEFAULT_INTERVAL_MS = 20_000L;
     private static final long MIN_INTERVAL_MS = 5_000L;
-    private static final long CROSSFADE_MS = 900L;
+    /** Legacy default (~0.9s) approximated as 1s when no pref is set. */
+    private static final long DEFAULT_CROSSFADE_MS = 1_000L;
+    static final String LIBRARY_MOVIES = "movies";
+    static final String LIBRARY_SHOWS = "shows";
+    static final String LIBRARY_BOTH = "both";
 
     /**
      * Ken Burns end scale: ~5% zoom over each slide (~2× the prior 2.5% rate at the
@@ -94,6 +98,11 @@ public final class ScreensaverRenderer {
     /** {@link #LOGO_SIZE_SMALL}, {@link #LOGO_SIZE_MEDIUM}, or {@link #LOGO_SIZE_LARGE}. */
     private String logoSize = LOGO_SIZE_MEDIUM;
     private long intervalMs = DEFAULT_INTERVAL_MS;
+    private long crossfadeMs = DEFAULT_CROSSFADE_MS;
+    /** Ken Burns / motion speed multiplier: 1, 2, or 3 (1x = previous default pace). */
+    private int animSpeed = 1;
+    private String libraryFilter = LIBRARY_BOTH;
+    private boolean recentOnly;
 
     private final Runnable advanceRunnable = this::advance;
     private final Runnable retryPlaylistRunnable = this::retryPlaylistLater;
@@ -143,8 +152,13 @@ public final class ScreensaverRenderer {
                     status("No Plex movies/shows with artwork found.");
                     return;
                 }
+                List<PlexApi.ScreensaverItem> filtered = filterPlaylist(items, libraryFilter, recentOnly);
+                if (filtered.isEmpty()) {
+                    status("No matching titles for current screensaver filters.");
+                    return;
+                }
                 playlist.clear();
-                playlist.addAll(items);
+                playlist.addAll(filtered);
                 index = 0;
                 // Keep spinner until first bg+logo (or text) is ready — hideStatus only after commit.
                 showLoadingSpinner();
@@ -185,13 +199,74 @@ public final class ScreensaverRenderer {
         showLogo = prefs.getBoolean("screensaver_show_logo", true);
         allowTextTitle = prefs.getBoolean("screensaver_allow_text_title", false);
         showDate = prefs.getBoolean("screensaver_show_date", true);
+        recentOnly = prefs.getBoolean("screensaver_recent_only", false);
         logoSize = normalizeLogoSize(prefs.getString("screensaver_logo_size", LOGO_SIZE_MEDIUM));
+        libraryFilter = normalizeLibraryFilter(prefs.getString("screensaver_library", LIBRARY_BOTH));
+        animSpeed = normalizeAnimSpeed(prefs.getString("screensaver_anim_speed", "1"));
         int seconds = 20;
         try {
             seconds = Integer.parseInt(prefs.getString("screensaver_interval_sec", "20"));
         } catch (Exception ignored) {
         }
+        // Honour legacy 10/15 even if the segmented UI no longer offers them.
         intervalMs = Math.max(MIN_INTERVAL_MS, seconds * 1000L);
+        int crossfadeSec = 1;
+        try {
+            crossfadeSec = Integer.parseInt(prefs.getString("screensaver_crossfade_sec", "1"));
+        } catch (Exception ignored) {
+        }
+        crossfadeMs = Math.max(400L, normalizeCrossfadeSec(crossfadeSec) * 1000L);
+    }
+
+    static String normalizeLibraryFilter(@Nullable String value) {
+        if (LIBRARY_MOVIES.equals(value) || LIBRARY_SHOWS.equals(value)) return value;
+        return LIBRARY_BOTH;
+    }
+
+    static int normalizeAnimSpeed(@Nullable String value) {
+        try {
+            int v = Integer.parseInt(value != null ? value.trim() : "1");
+            if (v == 2 || v == 3) return v;
+        } catch (Exception ignored) {
+        }
+        return 1;
+    }
+
+    static int normalizeCrossfadeSec(int sec) {
+        if (sec == 1 || sec == 2 || sec == 3 || sec == 5) return sec;
+        return 1;
+    }
+
+    /**
+     * Filters screensaver candidates by library type and optional “last two years” gate.
+     */
+    static List<PlexApi.ScreensaverItem> filterPlaylist(List<PlexApi.ScreensaverItem> items,
+                                                        @Nullable String libraryFilter,
+                                                        boolean recentOnly) {
+        String filter = normalizeLibraryFilter(libraryFilter);
+        List<PlexApi.ScreensaverItem> out = new ArrayList<>();
+        long cutoffYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) - 2;
+        for (PlexApi.ScreensaverItem item : items) {
+            if (item == null) continue;
+            if (LIBRARY_MOVIES.equals(filter) && !"movie".equalsIgnoreCase(item.type)) continue;
+            if (LIBRARY_SHOWS.equals(filter) && !"show".equalsIgnoreCase(item.type)) continue;
+            if (recentOnly && !isReleasedWithinYears(item.originallyAvailableAt, cutoffYear)) continue;
+            out.add(item);
+        }
+        return out;
+    }
+
+    /** True when originallyAvailableAt year is &gt;= cutoffYear (inclusive). Unknown dates fail the gate. */
+    static boolean isReleasedWithinYears(@Nullable String originallyAvailableAt, long cutoffYear) {
+        if (originallyAvailableAt == null) return false;
+        String s = originallyAvailableAt.trim();
+        if (s.length() < 4) return false;
+        try {
+            int year = Integer.parseInt(s.substring(0, 4));
+            return year >= cutoffYear;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     static String normalizeLogoSize(@Nullable String value) {
@@ -434,7 +509,7 @@ public final class ScreensaverRenderer {
         // Property alpha (not Animation) so scale and fade share one compositor path — no jumps.
         incoming.animate()
                 .alpha(1f)
-                .setDuration(CROSSFADE_MS)
+                .setDuration(crossfadeMs)
                 .setInterpolator(kenBurnsInterpolator)
                 .start();
 
@@ -442,7 +517,7 @@ public final class ScreensaverRenderer {
             // Animate alpha only — do not cancel the outgoing scale animator.
             outgoing.animate()
                     .alpha(0f)
-                    .setDuration(CROSSFADE_MS)
+                    .setDuration(crossfadeMs)
                     .setInterpolator(kenBurnsInterpolator)
                     .withEndAction(() -> {
                         if (!running.get()) return;
@@ -473,7 +548,7 @@ public final class ScreensaverRenderer {
             int[] max = logoMaxPx(root, sizeMode);
             applyLogoSize(logoView, decodedLogo, max[0], max[1], sizeMode);
             logoView.setImageDrawable(decodedLogo);
-            logoView.animate().alpha(1f).setDuration(CROSSFADE_MS).start();
+            logoView.animate().alpha(1f).setDuration(crossfadeMs).start();
         } else {
             logoView.animate().cancel();
             logoView.setVisibility(View.GONE);
@@ -489,7 +564,7 @@ public final class ScreensaverRenderer {
                 applyTitleSize(titleView, logoSize);
                 titleView.setAlpha(0f);
                 titleView.setVisibility(View.VISIBLE);
-                titleView.animate().alpha(1f).setDuration(CROSSFADE_MS).start();
+                titleView.animate().alpha(1f).setDuration(crossfadeMs).start();
             }
         }
 
@@ -524,7 +599,9 @@ public final class ScreensaverRenderer {
     private void startKenBurns(ImageView view) {
         centerPivot(view);
         // Continue past the advance tick so the outgoing layer keeps zooming through crossfade.
-        long duration = Math.max(MIN_INTERVAL_MS, intervalMs + CROSSFADE_MS);
+        // animSpeed 2x/3x shortens the same zoom distance (1x = prior default pace).
+        long base = Math.max(MIN_INTERVAL_MS, intervalMs + crossfadeMs);
+        long duration = Math.max(MIN_INTERVAL_MS / 2, base / Math.max(1, animSpeed));
         view.animate()
                 .scaleX(KEN_BURNS_END_SCALE)
                 .scaleY(KEN_BURNS_END_SCALE)

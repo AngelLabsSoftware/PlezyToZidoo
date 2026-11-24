@@ -1,11 +1,15 @@
 <p align="center">
-  <img src="screenshots/icon.png" alt="PlezyPlexToZidoo" width="120"/>
+  <img src="screenshots/icon.png" alt="PlezyToZidoo+" width="120"/>
 </p>
 
-<h1 align="center">PlezyPlexToZidoo</h1>
+<h1 align="center">PlezyToZidoo+</h1>
 
 <p align="center">
-  Plezy for browsing. Zidoo for playback. The best of both worlds.
+  Enhanced native playback and Plex integration for Zidoo media players, with intro and credit skipping, Up Next autoplay, Plex artwork screensavers and flexible media path mapping.
+</p>
+
+<p align="center">
+  <em>by Angel Labs</em>
 </p>
 
 <p align="center">
@@ -14,11 +18,13 @@
   <img src="https://img.shields.io/badge/package-com.plezyplextozidoo-blue?style=flat-square" alt="com.plezyplextozidoo">
 </p>
 
-PlezyPlexToZidoo is a small Android app designed for the **Zidoo Z9X 8K**. It allows you to browse your Plex library using Plezy while enjoying the picture and sound quality of the Zidoo's native media player.
+**PlezyToZidoo+** is a small Android app designed for the **Zidoo Z9X 8K**. It allows you to browse your Plex library using Plezy while enjoying the picture and sound quality of the Zidoo's native media player.
 
 It also brings across some of the features you might miss when using an external player, including Skip Intro, Skip Credits, Up Next and synchronised playback progress.
 
 As an added bonus, it includes a cinematic 4K screensaver using artwork and title logos from your own Plex library.
+
+This is an independent project by **Angel Labs**. It is not affiliated with, endorsed by, or an official product of Plezy, Plex, or Zidoo. The GitHub repository remains `nagel0r/PlezyPlexToZidoo` (private); the Android package id stays `com.plezyplextozidoo` so signed updates install over previous builds.
 
 ## Why I made this
 
@@ -73,7 +79,7 @@ If you dismiss a skip button, it stays dismissed for that visit to the segment. 
 
 Not all credits are created equal!
 
-Many films have additional scenes during or after the credits. Rather than simply ending playback when the credits begin, PlezyPlexToZidoo skips individual credits segments.
+Many films have additional scenes during or after the credits. Rather than simply ending playback when the credits begin, PlezyToZidoo+ skips individual credits segments.
 
 If Plex has correctly identified multiple credits sequences, you can skip the first set of credits, enjoy the additional scene, then skip the next set of credits.
 
@@ -129,7 +135,7 @@ These are maximum sizes. Smaller logos are not unnecessarily enlarged, helping t
 
 ### Setting up the screensaver
 
-Open PlezyPlexToZidoo and enter your Plex server address and token in the Plex Server settings.
+Open PlezyToZidoo+ and enter your Plex server address and token in the Plex connection settings.
 
 For a typical local Plex server, the address will look something like:
 
@@ -139,7 +145,7 @@ http://192.168.1.10:32400
 
 Remember to include the port number, normally **32400**.
 
-Open the **Plex Artwork Screensaver** settings and use Preview to check that everything is working.
+Open the **Plex screensaver** settings and use Preview to check that everything is working.
 
 To use it as your normal screensaver, open the Zidoo's native screensaver settings and select **Plex Artwork**.
 
@@ -149,11 +155,11 @@ You don't need to use the Zidoo Image Player or manually download any artwork.
 
 1. Download the latest signed APK from [GitHub Releases](https://github.com/nagel0r/PlezyPlexToZidoo/releases).
 2. Install the APK on your Zidoo.
-3. Open PlezyPlexToZidoo and configure your path substitution settings.
+3. Open PlezyToZidoo+ and configure your path substitution settings.
 4. In Plezy, configure the custom/external player package shown below.
 5. Play a film or TV episode to check that everything is working.
 
-The external player package is:
+The external player package is unchanged:
 
 ```
 com.plezyplextozidoo
@@ -168,7 +174,7 @@ On the Zidoo Z9X 8K, the easiest way to grant this permission is when you first 
 1. Start playback from Plezy.
 2. An Android settings panel should appear at the side of the screen if permission is required.
 3. Scroll towards the bottom of the application list.
-4. Select **PlezyPlexToZidoo**.
+4. Select **PlezyToZidoo+**.
 5. Enable permission to display over other applications.
 
 This is required for the Manual and Countdown skip modes.
@@ -193,19 +199,19 @@ The app has been developed and tested on a Zidoo Z9X 8K. Compatibility with othe
 
 ## App settings
 
-Open PlezyPlexToZidoo from the Zidoo launcher to configure the app.
+Open PlezyToZidoo+ from the Zidoo launcher to configure the app. The settings screen is a single scrolling page with two columns (Playback / Up Next / Plex connection on the left; Plex screensaver / Path substitutions on the right) and Settings & diagnostics full-width below.
 
-### Plex Server
+### Plex connection
 
 | Setting | Description |
 |---|---|
 | Server URL | Your Plex server address, including the port. |
-| X-Plex-Token | Your Plex authentication token, stored securely. |
+| Plex token | Your Plex authentication token, stored securely. Empty fields show **Not set**. |
 | Test connection | Checks that the app can connect to your Plex server. |
 
 Plezy normally supplies the server address and token when starting playback. These settings provide a fallback for playback and are also required for the standalone screensaver.
 
-### Player
+### Playback
 
 | Setting | Description |
 |---|---|
@@ -213,7 +219,7 @@ Plezy normally supplies the server address and token when starting playback. The
 | Show title when Zidoo player starts | Passes the film or episode title to the Zidoo player. |
 | Skip intros | Enables intro skipping. |
 | Skip credits | Enables credits skipping. |
-| Skip Behavior | Choose Manual, Countdown or Instant skipping. |
+| Skip behaviour | Choose Manual, Countdown or Instant skipping. |
 | Allow Skip overlay | Opens the permission settings required for the skip buttons. |
 
 ### Path substitution
@@ -226,8 +232,8 @@ Path substitution allows you to translate one into the other.
 
 | Setting | Description |
 |---|---|
-| Part of the path to replace | The prefix of the file path reported by Plex. |
-| Replaced with | The equivalent prefix accessible by the Zidoo. |
+| Source path | The prefix of the file path reported by Plex. |
+| Replacement path | The equivalent prefix accessible by the Zidoo. |
 | SMB username/password | Optional credentials for SMB network shares. |
 
 An example configuration:
@@ -236,7 +242,7 @@ An example configuration:
 /media/ → /data/
 ```
 
-You can configure up to ten substitution rules to accommodate different libraries and storage locations.
+You can configure up to ten substitution rules to accommodate different libraries and storage locations. Unused additional rules show **Not set** until you enter a value — example paths are never treated as saved rules.
 
 Your own configuration will depend on how your Plex server and Zidoo access your media.
 
@@ -250,7 +256,9 @@ Settings are saved to:
 Downloads/PlezyPlexToZidooSettings.txt
 ```
 
-Passwords and tokens are excluded from exports by default.
+Passwords and tokens are excluded from exports by default. **Include passwords in export** resets to off after each export and whenever you open Settings.
+
+When passwords are excluded, the export also strips Plex tokens and credentials embedded in URLs.
 
 If you choose to include passwords, the exported file contains sensitive credentials in plain text. Keep it somewhere secure and don't share it.
 
@@ -267,7 +275,7 @@ This can be useful if you're having problems getting the Zidoo to locate your me
 For anyone interested in what's happening behind the scenes:
 
 1. Plezy sends a playback request containing the Plex media URL.
-2. PlezyPlexToZidoo resolves the media metadata and retrieves available intro and credits markers.
+2. PlezyToZidoo+ resolves the media metadata and retrieves available intro and credits markers.
 3. Path substitution translates the media path into something the Zidoo can access.
 4. Playback is handed over to the native Zidoo player.
 5. The app monitors playback position using the Zidoo's local player API.
@@ -278,7 +286,7 @@ For anyone interested in what's happening behind the scenes:
 Plezy
   |
   v
-PlezyPlexToZidoo ---- Plex API
+PlezyToZidoo+ ---- Plex API
   |                  Metadata, markers,
   |                  progress and artwork
   v
@@ -293,7 +301,7 @@ This project is based on **[JellyfinToZidoo](https://github.com/magnetgrouplabs/
 
 Much of the original groundwork, including launching the Zidoo player, monitoring playback, path substitution, skip controls, next-episode functionality and settings import/export, comes from that project.
 
-PlezyPlexToZidoo adapts that work to use the Plex HTTP API and Plezy's external player integration, with further development of the skip functionality, screensaver and user interface.
+PlezyToZidoo+ adapts that work to use the Plex HTTP API and Plezy's external player integration, with further development of the skip functionality, screensaver and user interface by **Angel Labs**.
 
 Earlier lineage also includes [PlexToZidoo](https://github.com/bowlingbeeg/PlexToZidoo) by bowlingbeeg.
 

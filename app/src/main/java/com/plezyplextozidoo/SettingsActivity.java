@@ -39,6 +39,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -132,6 +133,9 @@ public class SettingsActivity extends AppCompatActivity {
         AppCompatButton btnExport = findViewById(R.id.btnExport);
         clearTint(btnPreview, btnTest, btnManage, btnImport, btnExport);
 
+        // Safer UX: never leave "include passwords" sticky across app/settings restarts.
+        resetExportPasswordsToggle();
+
         loadFromPrefs();
         wireSwitches();
         wireSegments();
@@ -145,6 +149,16 @@ public class SettingsActivity extends AppCompatActivity {
     protected void onStart() {
         super.onStart();
         refreshOverlayStatus();
+    }
+
+    /** Clears the export-passwords flag in prefs and (when bound) the switch UI. */
+    private void resetExportPasswordsToggle() {
+        prefs.edit().putBoolean("export_include_passwords", false).apply();
+        if (swExportPasswords != null) {
+            suppressWatchers = true;
+            swExportPasswords.setChecked(false);
+            suppressWatchers = false;
+        }
     }
 
     private void bindToggle(int includeId, int labelRes) {
@@ -590,13 +604,42 @@ public class SettingsActivity extends AppCompatActivity {
                 || key.startsWith("smbPassword"));
     }
 
+    private static final Pattern EXPORT_AUTH_QUERY = Pattern.compile(
+            "(?i)([?&])(X-Plex-Token|api_key|ApiKey)=[^&\\s]*");
+    private static final Pattern EXPORT_URL_USERINFO = Pattern.compile(
+            "(?i)(://)([^:/@\\s]+):([^@/\\s]*)@");
+
+    /**
+     * When passwords are excluded from export, strip embedded auth from string values
+     * (query tokens and {@code user:pass@} URL credentials) so sensitive material is not written.
+     */
+    static String sanitizeExportString(String value) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        String s = EXPORT_AUTH_QUERY.matcher(value).replaceAll("$1");
+        s = s.replace("?&", "?").replace("&&", "&");
+        if (s.endsWith("?") || s.endsWith("&")) {
+            s = s.substring(0, s.length() - 1);
+        }
+        s = EXPORT_URL_USERINFO.matcher(s).replaceAll("$1");
+        return s;
+    }
+
+    static Object sanitizeExportValue(Object value, boolean includePasswords) {
+        if (includePasswords || !(value instanceof String)) {
+            return value;
+        }
+        return sanitizeExportString((String) value);
+    }
+
     static String buildExportJson(Map<String, ?> prefsMap, boolean includePasswords) {
         LinkedHashMap<String, Object> filtered = new LinkedHashMap<>();
         for (Map.Entry<String, ?> entry : prefsMap.entrySet()) {
             String key = entry.getKey();
             if ("plex_access_token".equals(key)) continue;
             if (!includePasswords && isPasswordKey(key)) continue;
-            filtered.put(key, entry.getValue());
+            filtered.put(key, sanitizeExportValue(entry.getValue(), includePasswords));
         }
         return new GsonBuilder().setPrettyPrinting().create().toJson(filtered);
     }
@@ -634,6 +677,8 @@ public class SettingsActivity extends AppCompatActivity {
         } catch (Exception e) {
             Toast.makeText(this, e.toString(), Toast.LENGTH_LONG).show();
         } finally {
+            // Always reset after export so a one-shot opt-in does not stick.
+            resetExportPasswordsToggle();
             try {
                 if (output != null) {
                     output.flush();

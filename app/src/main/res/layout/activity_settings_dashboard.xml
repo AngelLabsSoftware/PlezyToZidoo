@@ -10,7 +10,7 @@
     android:paddingEnd="28dp"
     android:paddingBottom="16dp">
 
-    <!-- Header -->
+    <!-- Header: PlezyToZidoo+ / by Angel Labs · version top-right -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -19,6 +19,7 @@
         android:paddingBottom="16dp">
 
         <ImageView
+            android:id="@+id/headerLogo"
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:contentDescription="@string/app_name"
@@ -66,12 +67,17 @@
         android:fillViewport="true"
         android:scrollbars="vertical">
 
+        <!--
+          Two independently stacked columns (one vertical page scroll):
+          Left  — Playback, Up Next, Plex connection
+          Right — Plex screensaver, Path substitutions
+          Full width below — Settings & diagnostics
+        -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- Top row: Playback + Up Next | Screensaver -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -86,7 +92,7 @@
                     android:layout_weight="1"
                     android:orientation="vertical">
 
-                    <!-- Playback panel -->
+                    <!-- Playback -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -143,7 +149,7 @@
                             android:text="@string/overlay_permission_denied" />
                     </LinearLayout>
 
-                    <!-- Up Next panel -->
+                    <!-- Up Next (compact — no wasted vertical stretch) -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -172,300 +178,298 @@
                             android:layout_marginTop="6dp"
                             android:orientation="horizontal" />
                     </LinearLayout>
+
+                    <!-- Plex connection -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:background="@drawable/dash_panel_bg"
+                        android:orientation="vertical"
+                        android:padding="16dp">
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.PanelTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/plex_server_settings" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="@string/plex_server_url_summary" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="@string/plex_server_url_title" />
+
+                        <EditText
+                            android:id="@+id/inputServerUrl"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:background="@drawable/dash_input_bg"
+                            android:hint="@string/plex_server_url_hint"
+                            android:imeOptions="actionNext"
+                            android:inputType="textUri"
+                            android:padding="12dp"
+                            android:singleLine="true"
+                            android:textColor="@color/dash_text_primary"
+                            android:textColorHint="@color/dash_text_secondary"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="@string/plex_token_title" />
+
+                        <EditText
+                            android:id="@+id/inputPlexToken"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:background="@drawable/dash_input_bg"
+                            android:hint="@string/not_set"
+                            android:imeOptions="actionDone"
+                            android:inputType="textPassword"
+                            android:padding="12dp"
+                            android:singleLine="true"
+                            android:textColor="@color/dash_text_primary"
+                            android:textColorHint="@color/dash_text_secondary"
+                            android:textSize="14sp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnTestConnection"
+                            android:layout_width="match_parent"
+                            android:layout_height="44dp"
+                            android:layout_marginTop="12dp"
+                            android:background="@drawable/btn_tv_focus"
+                            android:backgroundTint="@null"
+                            android:text="@string/plex_test_connection_title"
+                            android:textAllCaps="false"
+                            android:textColor="@color/tv_focus_button_text" />
+                    </LinearLayout>
                 </LinearLayout>
 
-                <!-- Right column: Screensaver -->
+                <!-- Right column -->
                 <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="10dp"
                     android:layout_weight="1.15"
-                    android:background="@drawable/dash_panel_bg"
-                    android:orientation="vertical"
-                    android:padding="16dp">
+                    android:orientation="vertical">
 
-                    <TextView
-                        style="@style/TextAppearance.Plezy.PanelTitle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/screensaver_settings" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/screensaver_library_title" />
-
+                    <!-- Plex screensaver -->
                     <LinearLayout
-                        android:id="@+id/segLibrary"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:orientation="horizontal" />
+                        android:background="@drawable/dash_panel_bg"
+                        android:orientation="vertical"
+                        android:padding="16dp">
 
-                    <include
-                        android:id="@+id/rowRecentOnly"
-                        layout="@layout/dash_toggle_row" />
+                        <TextView
+                            style="@style/TextAppearance.Plezy.PanelTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/screensaver_settings" />
 
-                    <include
-                        android:id="@+id/rowAllowLowerRes"
-                        layout="@layout/dash_toggle_row" />
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/screensaver_library_title" />
 
-                    <include
-                        android:id="@+id/rowShowLogo"
-                        layout="@layout/dash_toggle_row" />
+                        <LinearLayout
+                            android:id="@+id/segLibrary"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:orientation="horizontal" />
 
-                    <include
-                        android:id="@+id/rowTextFallback"
-                        layout="@layout/dash_toggle_row" />
+                        <include
+                            android:id="@+id/rowRecentOnly"
+                            layout="@layout/dash_toggle_row" />
 
-                    <include
-                        android:id="@+id/rowShowYear"
-                        layout="@layout/dash_toggle_row" />
+                        <include
+                            android:id="@+id/rowAllowLowerRes"
+                            layout="@layout/dash_toggle_row" />
 
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/screensaver_logo_size_title" />
+                        <include
+                            android:id="@+id/rowShowLogo"
+                            layout="@layout/dash_toggle_row" />
 
+                        <include
+                            android:id="@+id/rowTextFallback"
+                            layout="@layout/dash_toggle_row" />
+
+                        <include
+                            android:id="@+id/rowShowYear"
+                            layout="@layout/dash_toggle_row" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/screensaver_logo_size_title" />
+
+                        <LinearLayout
+                            android:id="@+id/segLogoSize"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:orientation="horizontal" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/screensaver_interval_title" />
+
+                        <LinearLayout
+                            android:id="@+id/segSlideDuration"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:orientation="horizontal" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/screensaver_crossfade_title" />
+
+                        <LinearLayout
+                            android:id="@+id/segCrossfade"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:orientation="horizontal" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/screensaver_anim_speed_title" />
+
+                        <LinearLayout
+                            android:id="@+id/segAnimSpeed"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:orientation="horizontal" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnPreviewScreensaver"
+                            android:layout_width="match_parent"
+                            android:layout_height="44dp"
+                            android:layout_marginTop="12dp"
+                            android:background="@drawable/btn_tv_focus"
+                            android:backgroundTint="@null"
+                            android:text="@string/screensaver_preview_title"
+                            android:textAllCaps="false"
+                            android:textColor="@color/tv_focus_button_text" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:text="@string/screensaver_how_to_summary" />
+                    </LinearLayout>
+
+                    <!-- Path substitutions -->
                     <LinearLayout
-                        android:id="@+id/segLogoSize"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:orientation="horizontal" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/screensaver_interval_title" />
-
-                    <LinearLayout
-                        android:id="@+id/segSlideDuration"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:orientation="horizontal" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/screensaver_crossfade_title" />
-
-                    <LinearLayout
-                        android:id="@+id/segCrossfade"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:orientation="horizontal" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/screensaver_anim_speed_title" />
-
-                    <LinearLayout
-                        android:id="@+id/segAnimSpeed"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:orientation="horizontal" />
-
-                    <androidx.appcompat.widget.AppCompatButton
-                        android:id="@+id/btnPreviewScreensaver"
-                        android:layout_width="match_parent"
-                        android:layout_height="44dp"
                         android:layout_marginTop="12dp"
-                        android:background="@drawable/btn_tv_focus"
-                        android:backgroundTint="@null"
-                        android:text="@string/screensaver_preview_title"
-                        android:textAllCaps="false"
-                        android:textColor="@color/tv_focus_button_text" />
+                        android:background="@drawable/dash_panel_bg"
+                        android:orientation="vertical"
+                        android:padding="16dp">
 
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="8dp"
-                        android:text="@string/screensaver_how_to_summary" />
+                        <TextView
+                            style="@style/TextAppearance.Plezy.PanelTitle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="@string/substitution_settings" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="6dp"
+                            android:text="@string/path_sub_hint_summary" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="@string/path_to_replace" />
+
+                        <EditText
+                            android:id="@+id/inputPathReplace"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:background="@drawable/dash_input_bg"
+                            android:hint="@string/path_to_replace_hint"
+                            android:imeOptions="actionNext"
+                            android:inputType="text"
+                            android:padding="12dp"
+                            android:singleLine="true"
+                            android:textColor="@color/dash_text_primary"
+                            android:textColorHint="@color/dash_text_secondary"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            style="@style/TextAppearance.Plezy.Hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="10dp"
+                            android:text="@string/replaced_with" />
+
+                        <EditText
+                            android:id="@+id/inputPathWith"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:background="@drawable/dash_input_bg"
+                            android:hint="@string/replaced_with_hint"
+                            android:imeOptions="actionDone"
+                            android:inputType="text"
+                            android:padding="12dp"
+                            android:singleLine="true"
+                            android:textColor="@color/dash_text_primary"
+                            android:textColorHint="@color/dash_text_secondary"
+                            android:textSize="14sp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btnManageRules"
+                            android:layout_width="match_parent"
+                            android:layout_height="44dp"
+                            android:layout_marginTop="12dp"
+                            android:background="@drawable/btn_tv_focus"
+                            android:backgroundTint="@null"
+                            android:text="@string/substitution_link_more"
+                            android:textAllCaps="false"
+                            android:textColor="@color/tv_focus_button_text" />
+                    </LinearLayout>
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- Bottom row: Plex connection | Path substitutions -->
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:baselineAligned="false"
-                android:orientation="horizontal">
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginEnd="10dp"
-                    android:layout_weight="1"
-                    android:background="@drawable/dash_panel_bg"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.PanelTitle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/plex_server_settings" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/plex_server_url_summary" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="@string/plex_server_url_title" />
-
-                    <EditText
-                        android:id="@+id/inputServerUrl"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:background="@drawable/dash_input_bg"
-                        android:hint="@string/plex_server_url_hint"
-                        android:imeOptions="actionNext"
-                        android:inputType="textUri"
-                        android:padding="12dp"
-                        android:singleLine="true"
-                        android:textColor="@color/dash_text_primary"
-                        android:textColorHint="@color/dash_text_secondary"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="@string/plex_token_title" />
-
-                    <EditText
-                        android:id="@+id/inputPlexToken"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:background="@drawable/dash_input_bg"
-                        android:hint="••••••••"
-                        android:imeOptions="actionDone"
-                        android:inputType="textPassword"
-                        android:padding="12dp"
-                        android:singleLine="true"
-                        android:textColor="@color/dash_text_primary"
-                        android:textColorHint="@color/dash_text_secondary"
-                        android:textSize="14sp" />
-
-                    <androidx.appcompat.widget.AppCompatButton
-                        android:id="@+id/btnTestConnection"
-                        android:layout_width="match_parent"
-                        android:layout_height="44dp"
-                        android:layout_marginTop="12dp"
-                        android:background="@drawable/btn_tv_focus"
-                        android:backgroundTint="@null"
-                        android:text="@string/plex_test_connection_title"
-                        android:textAllCaps="false"
-                        android:textColor="@color/tv_focus_button_text" />
-                </LinearLayout>
-
-                <LinearLayout
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:layout_weight="1"
-                    android:background="@drawable/dash_panel_bg"
-                    android:orientation="vertical"
-                    android:padding="16dp">
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.PanelTitle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/substitution_settings" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="6dp"
-                        android:text="@string/path_sub_hint_summary" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="@string/path_to_replace" />
-
-                    <EditText
-                        android:id="@+id/inputPathReplace"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:background="@drawable/dash_input_bg"
-                        android:hint="@string/path_to_replace_hint"
-                        android:imeOptions="actionNext"
-                        android:inputType="text"
-                        android:padding="12dp"
-                        android:singleLine="true"
-                        android:textColor="@color/dash_text_primary"
-                        android:textColorHint="@color/dash_text_secondary"
-                        android:textSize="14sp" />
-
-                    <TextView
-                        style="@style/TextAppearance.Plezy.Hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="10dp"
-                        android:text="@string/replaced_with" />
-
-                    <EditText
-                        android:id="@+id/inputPathWith"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
-                        android:background="@drawable/dash_input_bg"
-                        android:hint="@string/replaced_with_hint"
-                        android:imeOptions="actionDone"
-                        android:inputType="text"
-                        android:padding="12dp"
-                        android:singleLine="true"
-                        android:textColor="@color/dash_text_primary"
-                        android:textColorHint="@color/dash_text_secondary"
-                        android:textSize="14sp" />
-
-                    <androidx.appcompat.widget.AppCompatButton
-                        android:id="@+id/btnManageRules"
-                        android:layout_width="match_parent"
-                        android:layout_height="44dp"
-                        android:layout_marginTop="12dp"
-                        android:background="@drawable/btn_tv_focus"
-                        android:backgroundTint="@null"
-                        android:text="@string/substitution_link_more"
-                        android:textAllCaps="false"
-                        android:textColor="@color/tv_focus_button_text" />
-                </LinearLayout>
-            </LinearLayout>
-
-            <!-- Diagnostics footer panel -->
+            <!-- Full-width diagnostics footer -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">PlezyPlexToZidoo</string>
-    <string name="settings_subtitle">Settings</string>
+    <string name="app_name">PlezyToZidoo+</string>
+    <string name="settings_subtitle">by Angel Labs</string>
+    <string name="developer_name">Angel Labs</string>
+    <string name="not_set">Not set</string>
 
     <!-- Preference Titles -->
     <string name="version_settings">Version</string>
@@ -24,8 +26,8 @@
     <string name="skip_behavior_title">Skip behaviour</string>
     <string name="skip_behavior_summary">Manual button (default), countdown, or instant auto-skip</string>
     <string name="overlay_permission_title">Allow Skip overlay</string>
-    <string name="overlay_permission_summary">Required for Manual and Countdown skip over the Zidoo player. On first play after install, an Android settings side panel may appear — scroll the app list to PlezyPlexToZidoo and allow display over other apps. Separate from screensaver settings.</string>
-    <string name="overlay_permission_toast">On first play: Android settings side panel → scroll app list → PlezyPlexToZidoo → allow display over other apps (not the screensaver setting).</string>
+    <string name="overlay_permission_summary">Required for Manual and Countdown skip over the Zidoo player. On first play after install, an Android settings side panel may appear — scroll the app list to PlezyToZidoo+ and allow display over other apps. Separate from screensaver settings.</string>
+    <string name="overlay_permission_toast">On first play: Android settings side panel → scroll app list → PlezyToZidoo+ → allow display over other apps (not the screensaver setting).</string>
     <string name="overlay_permission_granted">Overlay permission · Granted</string>
     <string name="overlay_permission_denied">Overlay permission · Not granted — tap to open</string>
     <string name="path_sub_hint_title">Path tip</string>
@@ -62,7 +64,7 @@
     <string name="substitution_rule_2_title">Path Substitution Rule 2 (optional)</string>
     <string name="substitution_link_more">Manage additional rules</string>
     <string name="manage_rules_title">Additional path rules</string>
-    <string name="manage_rules_subtitle">Rules 2–10 · values edit in place · passwords masked</string>
+    <string name="manage_rules_subtitle">Rules 2–10 · empty fields show Not set · stored passwords are masked</string>
     <string name="rule_card_title">Rule %1$d</string>
 
     <!-- Import/Export -->

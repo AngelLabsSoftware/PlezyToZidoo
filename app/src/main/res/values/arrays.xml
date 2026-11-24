@@ -11,19 +11,77 @@
         <item>instant</item>
     </string-array>
 
+    <string-array name="skip_behavior_segment_labels">
+        <item>Manual</item>
+        <item>Countdown</item>
+        <item>Instant</item>
+    </string-array>
+
+    <string-array name="up_next_countdown_labels">
+        <item>3s</item>
+        <item>5s</item>
+        <item>7s</item>
+        <item>10s</item>
+    </string-array>
+    <string-array name="up_next_countdown_values">
+        <item>3</item>
+        <item>5</item>
+        <item>7</item>
+        <item>10</item>
+    </string-array>
+
+    <string-array name="screensaver_library_labels">
+        <item>Movies</item>
+        <item>TV</item>
+        <item>Both</item>
+    </string-array>
+    <string-array name="screensaver_library_values">
+        <item>movies</item>
+        <item>shows</item>
+        <item>both</item>
+    </string-array>
+
     <string-array name="screensaver_interval_entries">
-        <item>10 seconds</item>
-        <item>15 seconds</item>
         <item>20 seconds</item>
         <item>30 seconds</item>
+        <item>45 seconds</item>
         <item>60 seconds</item>
     </string-array>
     <string-array name="screensaver_interval_values">
-        <item>10</item>
-        <item>15</item>
         <item>20</item>
         <item>30</item>
+        <item>45</item>
         <item>60</item>
+    </string-array>
+    <string-array name="screensaver_interval_labels">
+        <item>20s</item>
+        <item>30s</item>
+        <item>45s</item>
+        <item>60s</item>
+    </string-array>
+
+    <string-array name="screensaver_crossfade_labels">
+        <item>1s</item>
+        <item>2s</item>
+        <item>3s</item>
+        <item>5s</item>
+    </string-array>
+    <string-array name="screensaver_crossfade_values">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
+        <item>5</item>
+    </string-array>
+
+    <string-array name="screensaver_anim_speed_labels">
+        <item>1x</item>
+        <item>2x</item>
+        <item>3x</item>
+    </string-array>
+    <string-array name="screensaver_anim_speed_values">
+        <item>1</item>
+        <item>2</item>
+        <item>3</item>
     </string-array>
 
     <string-array name="screensaver_logo_size_entries">

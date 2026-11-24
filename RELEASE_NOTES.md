@@ -1,5 +1,14 @@
 # Release notes
 
+## 2026.11.11 — Settings dashboard + Up Next polish
+
+- **Settings:** TV-oriented charcoal dashboard (two-column panels, segmented selectors, mono toggles/buttons). Existing preference keys preserved for upgrades.
+- **Up Next:** Material purple tint removed (AppCompatButton + cleared backgroundTint). Content group ~50% screen height, centred. Configurable countdown 3/5/7/10s (default 7; independent of Skip’s 3s). Import/export includes the new pref.
+- **Screensaver:** Library Movies/TV/Both; recent-titles (last 2 years); slide 20/30/45/60s; crossfade 1/2/3/5s; animation speed 1x/2x/3x (1x = prior Ken Burns pace).
+- **Copy:** Fallback vs screensaver Plex credentials; generic path examples; Zidoo overlay vs screensaver instructions.
+- Playback/skip/arming logic unchanged from 11.10.
+- Version `2026.11.11` / `versionCode` `20261132`.
+
 ## 2026.11.10 — UI polish + README
 
 - **Screensaver logos:** Small (25% left), Medium (50% left, default), Large (80% centred with ≥10% side padding); never upscale past native; tall-logo height cap.

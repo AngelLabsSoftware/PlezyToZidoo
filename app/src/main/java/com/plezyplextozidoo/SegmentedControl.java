@@ -5,6 +5,7 @@ import android.graphics.Typeface;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
+import android.view.ViewGroup;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -36,10 +37,18 @@ public final class SegmentedControl {
         container.removeAllViews();
         container.setOrientation(LinearLayout.HORIZONTAL);
         container.setFocusable(false);
+        container.setClipChildren(false);
+        container.setClipToPadding(false);
+        if (container.getParent() instanceof ViewGroup) {
+            ViewGroup parent = (ViewGroup) container.getParent();
+            parent.setClipChildren(false);
+            parent.setClipToPadding(false);
+        }
 
-        int padH = dp(ctx, 8);
-        int padV = dp(ctx, 8);
-        int gap = dp(ctx, 6);
+        // Extra padding so focus ring insets stay inside the chip (no layout jump).
+        int padH = dp(ctx, 12);
+        int padV = dp(ctx, 10);
+        int gap = dp(ctx, 4);
 
         String selected = currentValue != null ? currentValue : values[0];
         boolean matched = false;

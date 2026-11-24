@@ -1,5 +1,13 @@
 # Release notes
 
+## 2026.11.12 — Settings focus + additional rules UI
+
+- Stronger TV remote focus: distinct unselected / selected / focused / selected+focused (segmented, buttons, fields); whole-row toggle highlight; focus rings not clipped; no layout jump on focus.
+- Manage Additional Rules redesigned as charcoal cards (numbered rules 2–10, 2-column path + SMB fields, masked passwords); same preference keys.
+- Dialog chrome aligned to dashboard monochrome.
+- Playback / skip / Up Next / screensaver / path semantics unchanged.
+- Version `2026.11.12` / `versionCode` `20261133`.
+
 ## 2026.11.11 — Settings dashboard + Up Next polish
 
 - **Settings:** TV-oriented charcoal dashboard (two-column panels, segmented selectors, mono toggles/buttons). Existing preference keys preserved for upgrades.

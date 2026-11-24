@@ -1,27 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base application theme. -->
-    <style name="Theme.PlezyPlexToZidoo" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
-        <!-- Primary brand color. -->
-        <item name="colorPrimary">@color/purple_500</item>
-        <item name="colorPrimaryVariant">@color/purple_700</item>
-        <item name="colorOnPrimary">@color/white</item>
-        <!-- Secondary brand color. -->
-        <item name="colorSecondary">@color/teal_200</item>
-        <item name="colorSecondaryVariant">@color/teal_700</item>
+    <!-- Night mirrors day — dashboard is always charcoal -->
+    <style name="Theme.PlezyPlexToZidoo" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/white</item>
+        <item name="colorPrimaryVariant">@color/dash_panel</item>
+        <item name="colorOnPrimary">@color/black</item>
+        <item name="colorSecondary">@color/dash_text_secondary</item>
+        <item name="colorSecondaryVariant">@color/dash_text_secondary</item>
         <item name="colorOnSecondary">@color/black</item>
-        <!-- Status bar color. -->
-        <item name="android:statusBarColor">@color/black</item>
-        <!-- Customize your theme here. -->
-        <item name="android:windowBackground">@color/black</item>
-        <item name="actionBarStyle">@style/Widget.MaterialComponents.ActionBar.Primary</item>
+        <item name="colorAccent">@color/white</item>
+        <item name="android:statusBarColor">@color/dash_bg</item>
+        <item name="android:windowBackground">@color/dash_bg</item>
+        <item name="android:textColorPrimary">@color/dash_text_primary</item>
+        <item name="android:textColorSecondary">@color/dash_text_secondary</item>
+        <item name="materialButtonStyle">@style/Widget.Plezy.MonoButton</item>
+        <item name="buttonStyle">@style/Widget.Plezy.MonoButton</item>
+        <item name="switchStyle">@style/Widget.Plezy.MonoSwitch</item>
+        <item name="android:colorControlActivated">@color/white</item>
     </style>
+
     <style name="Theme.PlezyPlexToZidoo.Settings" parent="Theme.PlezyPlexToZidoo">
+        <item name="android:windowBackground">@color/dash_bg</item>
     </style>
+
     <style name="Theme.PlezyPlexToZidoo.Play" parent="Theme.PlezyPlexToZidoo">
-        <item name="actionBarTheme">@style/MyPlayActionBar</item>
-    </style>
-    <style name="MyPlayActionBar" parent="@style/Theme.PlezyPlexToZidoo">
-        <item name="colorPrimary">@color/black</item>
-        <item name="android:textColorPrimary">@color/dark_gray</item>
+        <item name="android:windowBackground">@color/black</item>
     </style>
 </resources>

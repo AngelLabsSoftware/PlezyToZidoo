@@ -1,15 +1,16 @@
 package com.plezyplextozidoo;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.CountDownTimer;
-import android.widget.Button;
+import android.util.Log;
 import android.widget.ImageView;
 import android.widget.TextView;
 
-import android.util.Log;
-
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.appcompat.widget.AppCompatButton;
+import androidx.preference.PreferenceManager;
 
 import com.bumptech.glide.Glide;
 import com.bumptech.glide.load.engine.DiskCacheStrategy;
@@ -28,8 +29,13 @@ import jp.wasabeef.glide.transformations.BlurTransformation;
  */
 public class UpNextActivity extends AppCompatActivity {
 
+    /** Pref key — seconds until auto-play. Independent of Skip Intro/Credits (always 3s). */
+    public static final String PREF_UP_NEXT_COUNTDOWN_SEC = "up_next_countdown_sec";
+    public static final int DEFAULT_UP_NEXT_COUNTDOWN_SEC = 7;
+
     private CountDownTimer countDownTimer;
     private boolean cancelled = false;
+    private boolean finished = false;
 
     private String nextItemId;
     private String serverPath;
@@ -63,15 +69,21 @@ public class UpNextActivity extends AppCompatActivity {
         TextView seriesNameView = findViewById(R.id.seriesName);
         TextView episodeInfoView = findViewById(R.id.episodeInfo);
         TextView countdownView = findViewById(R.id.countdown);
-        Button btnPlayNow = findViewById(R.id.btnPlayNow);
-        Button btnCancel = findViewById(R.id.btnCancel);
+        AppCompatButton btnPlayNow = findViewById(R.id.btnPlayNow);
+        AppCompatButton btnCancel = findViewById(R.id.btnCancel);
+
+        // Material themes tint AppCompatButton via colorPrimary — clear so mono drawable shows.
+        // Use public setBackgroundTintList (minSdk 28); avoid RestrictedApi support API.
+        btnPlayNow.setBackgroundTintList(null);
+        btnCancel.setBackgroundTintList(null);
+        btnPlayNow.setBackgroundResource(R.drawable.btn_tv_focus);
+        btnCancel.setBackgroundResource(R.drawable.btn_tv_focus);
 
         seriesNameView.setText(seriesName != null ? seriesName : "");
         String episodeInfoText = String.format("S%02dE%02d - %s",
                 seasonNumber, episodeNumber, episodeName != null ? episodeName : "");
         episodeInfoView.setText(episodeInfoText);
 
-        // Prefer explicit URLs; otherwise build from Plex metadata paths
         if ((backdropUrl == null || backdropUrl.isEmpty()) && serverUrl != null && seriesId != null) {
             backdropUrl = PlexApi.buildImageUrl(serverUrl,
                     "/library/metadata/" + seriesId + "/art", accessToken);
@@ -95,28 +107,36 @@ public class UpNextActivity extends AppCompatActivity {
             Glide.with(this)
                     .load(thumbUrl)
                     .apply(new RequestOptions()
-                            .override(640, 360)
+                            .override(960, 540)
                             .transform(new RoundedCorners(16))
                             .diskCacheStrategy(DiskCacheStrategy.ALL))
                     .into(episodeThumbnail);
         }
 
-        countdownView.setText("Playing in 10");
-        countDownTimer = new CountDownTimer(10000, 1000) {
+        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+        int countdownSec = normalizeCountdownSec(
+                prefs.getString(PREF_UP_NEXT_COUNTDOWN_SEC, String.valueOf(DEFAULT_UP_NEXT_COUNTDOWN_SEC)));
+        long countdownMs = countdownSec * 1000L;
+
+        countdownView.setText(getString(R.string.up_next_playing_in, countdownSec));
+        countDownTimer = new CountDownTimer(countdownMs, 1000) {
             @Override
             public void onTick(long millisUntilFinished) {
-                countdownView.setText("Playing in " + (millisUntilFinished / 1000));
+                if (cancelled || finished) return;
+                countdownView.setText(getString(R.string.up_next_playing_in,
+                        Math.max(1, (int) Math.ceil(millisUntilFinished / 1000.0))));
             }
 
             @Override
             public void onFinish() {
-                if (!cancelled) {
+                if (!cancelled && !finished) {
                     launchNextEpisode();
                 }
             }
         }.start();
 
         btnPlayNow.setOnClickListener(v -> {
+            if (cancelled || finished) return;
             cancelled = true;
             if (countDownTimer != null) {
                 countDownTimer.cancel();
@@ -125,6 +145,7 @@ public class UpNextActivity extends AppCompatActivity {
         });
 
         btnCancel.setOnClickListener(v -> {
+            if (finished) return;
             cancelled = true;
             if (countDownTimer != null) {
                 countDownTimer.cancel();
@@ -134,10 +155,28 @@ public class UpNextActivity extends AppCompatActivity {
         });
 
         btnPlayNow.requestFocus();
-        Log.d("UpNext", "Screen displayed: " + seriesName + " S" + seasonNumber + "E" + episodeNumber);
+        Log.d("UpNext", "Screen displayed: " + seriesName + " S" + seasonNumber + "E" + episodeNumber
+                + " countdown=" + countdownSec + "s");
+    }
+
+    /** Allowed values: 3, 5, 7 (default), 10. Unknown → default. */
+    static int normalizeCountdownSec(String raw) {
+        if (raw == null) return DEFAULT_UP_NEXT_COUNTDOWN_SEC;
+        try {
+            int v = Integer.parseInt(raw.trim());
+            if (v == 3 || v == 5 || v == 7 || v == 10) return v;
+        } catch (NumberFormatException ignored) {
+        }
+        return DEFAULT_UP_NEXT_COUNTDOWN_SEC;
     }
 
     private void launchNextEpisode() {
+        if (finished) return;
+        finished = true;
+        cancelled = true;
+        if (countDownTimer != null) {
+            countDownTimer.cancel();
+        }
         Intent resultIntent = new Intent();
         resultIntent.putExtra("nextItemId", nextItemId);
         resultIntent.putExtra("serverPath", serverPath);
@@ -151,8 +190,19 @@ public class UpNextActivity extends AppCompatActivity {
     }
 
     @Override
+    public void onBackPressed() {
+        cancelled = true;
+        if (countDownTimer != null) {
+            countDownTimer.cancel();
+        }
+        setResult(RESULT_CANCELED);
+        super.onBackPressed();
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
+        cancelled = true;
         if (countDownTimer != null) {
             countDownTimer.cancel();
             countDownTimer = null;

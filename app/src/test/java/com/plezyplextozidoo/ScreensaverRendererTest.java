@@ -77,6 +77,38 @@ public class ScreensaverRendererTest {
     }
 
     @Test
+    public void libraryAndAnimSpeed_normalize() {
+        assertEquals(ScreensaverRenderer.LIBRARY_BOTH,
+                ScreensaverRenderer.normalizeLibraryFilter(null));
+        assertEquals(ScreensaverRenderer.LIBRARY_MOVIES,
+                ScreensaverRenderer.normalizeLibraryFilter("movies"));
+        assertEquals(ScreensaverRenderer.LIBRARY_SHOWS,
+                ScreensaverRenderer.normalizeLibraryFilter("shows"));
+        assertEquals(1, ScreensaverRenderer.normalizeAnimSpeed(null));
+        assertEquals(2, ScreensaverRenderer.normalizeAnimSpeed("2"));
+        assertEquals(3, ScreensaverRenderer.normalizeAnimSpeed("3"));
+        assertEquals(1, ScreensaverRenderer.normalizeAnimSpeed("9"));
+        assertEquals(1, ScreensaverRenderer.normalizeCrossfadeSec(0));
+        assertEquals(5, ScreensaverRenderer.normalizeCrossfadeSec(5));
+    }
+
+    @Test
+    public void filterPlaylist_byTypeAndRecent() {
+        PlexApi.ScreensaverItem movie = new PlexApi.ScreensaverItem(
+                "1", "Film", "/a", "/l", "2024-01-01", "movie");
+        PlexApi.ScreensaverItem show = new PlexApi.ScreensaverItem(
+                "2", "Series", "/a", "/l", "1999-01-01", "show");
+        java.util.List<PlexApi.ScreensaverItem> all = java.util.Arrays.asList(movie, show);
+
+        assertEquals(1, ScreensaverRenderer.filterPlaylist(all, "movies", false).size());
+        assertEquals(1, ScreensaverRenderer.filterPlaylist(all, "shows", false).size());
+        assertEquals(2, ScreensaverRenderer.filterPlaylist(all, "both", false).size());
+        assertEquals(1, ScreensaverRenderer.filterPlaylist(all, "both", true).size());
+        assertTrue(ScreensaverRenderer.isReleasedWithinYears("2024-06-01", 2024));
+        assertFalse(ScreensaverRenderer.isReleasedWithinYears("1999", 2024));
+    }
+
+    @Test
     public void candidateEligible_requiresLogoUnlessTextFallback() {
         PlexApi.ScreensaverItem withLogo = new PlexApi.ScreensaverItem(
                 "1", "Film", "/art/1", "/logo/1", "1999", "movie");

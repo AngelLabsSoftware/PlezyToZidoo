@@ -1,5 +1,12 @@
 # Release notes
 
+## 2026.11.9 — Seek rearm for Skip Intro/Credits
+
+- Skip Intro/Credits are **position-based**: after FF/RW/chapter/manual seek or resume settles inside a marker, the configured mode activates.
+- Back/cancel dismisses the **current visit only**; leaving and returning rearms. App skip seeks are distinguished from user scrubbing (no Instant loops).
+- Keeps 11.8 multi-segment credits + true-end Up Next and screensaver logo gate / text fallback.
+- Version `2026.11.9` / `versionCode` `20261130`.
+
 ## 2026.11.8 — Credits segment skip + screensaver logo gate
 
 - **Credits:** Skip Credits seeks past the **current** Plex credits/outro segment only (all markers retained). Manual / Countdown / Instant share that destination for films and TV. Instant no longer binge-closes at earliest credits start.

@@ -128,15 +128,15 @@ public class CreditsSegmentSkipTest {
     }
 
     @Test
-    public void backwardSeekDisarmsCurrent_notLater() {
+    public void visitDismissDoesNotBlockOtherSegments() {
+        // 11.9: dismiss is visit-scoped suppression, not permanent seek-disarm.
         List<PlexApi.CreditSegment> segments = segments(
                 seg(3_000_000, 3_200_000, false),
                 seg(3_400_000, 3_600_000, true));
-        Set<Integer> inactive = new HashSet<>();
-        Play.disarmCreditSegmentsOnBackwardSeek(3_100_000, 2_500_000, segments, inactive);
-        assertTrue(inactive.contains(0));
-        assertFalse(inactive.contains(1));
-        assertEquals(1, Play.findEligibleCreditSegmentIndex(3_450_000, segments, inactive));
+        Set<Integer> visitDismissed = new HashSet<>();
+        visitDismissed.add(0);
+        assertEquals(-1, Play.findEligibleCreditSegmentIndex(3_050_000, segments, visitDismissed));
+        assertEquals(1, Play.findEligibleCreditSegmentIndex(3_450_000, segments, visitDismissed));
     }
 
     @Test

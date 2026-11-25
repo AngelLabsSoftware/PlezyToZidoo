@@ -24,7 +24,7 @@ It also brings across some of the features you might miss when using an external
 
 As an added bonus, it includes a cinematic 4K screensaver using artwork and title logos from your own Plex library.
 
-This is an independent project by **Angel Labs**. It is not affiliated with, endorsed by, or an official product of Plezy, Plex, or Zidoo. The GitHub repository is `AngelLabsSoftware/PlezyToZidoo` (private); the Android package id stays `com.plezyplextozidoo` so signed updates install over previous builds.
+This is an independent project by **Angel Labs**. It is not affiliated with, endorsed by, or an official product of Plezy, Plex, or Zidoo. The GitHub repository is `AngelLabsSoftware/PlezyToZidoo` (private); the Android package id stays `com.plezyplextozidoo` so signed updates install over previous builds. Launcher icons use the circular Angel Labs mark with safe padding for Zidoo’s squircle masks; the settings header keeps the shaped logo.
 
 ## Why I made this
 

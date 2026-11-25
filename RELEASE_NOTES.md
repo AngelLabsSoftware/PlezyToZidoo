@@ -1,5 +1,11 @@
 # Release notes
 
+## 2026.11.15 — Launcher icon safe padding for Zidoo crop
+
+- **Icons:** Regenerated launcher mipmaps, round icons, and adaptive foreground from Adam’s circular-03 crop, scaled to **0.75** of the orange canvas (more safe margin) so Zidoo home-tile and PackageInstaller squircles no longer kiss the horns/face. Settings header still uses the shaped logo.
+- Package `com.plezyplextozidoo` and PP2Z signing unchanged; playback / settings behaviour unchanged.
+- Version `2026.11.15` / `versionCode` `20261136`.
+
 ## 2026.11.14 — Launcher icon padding for Zidoo squircle
 
 - **Icons:** Regenerated launcher mipmaps, round icons, and adaptive foreground from Adam’s circular logo crop (filled 1:1 — no extra inset) so Zidoo home-tile / PackageInstaller squircles keep his intended orange margin. Settings header still uses the shaped logo.

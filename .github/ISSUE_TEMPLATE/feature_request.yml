@@ -7,7 +7,7 @@ body:
     attributes:
       label: Before submitting
       options:
-        - label: I have searched the [existing issues](https://github.com/nagel0r/PlezyPlexToZidoo/issues) and confirmed this has not already been requested
+        - label: I have searched the [existing issues](https://github.com/AngelLabsSoftware/PlezyToZidoo/issues) and confirmed this has not already been requested
           required: true
         - label: I have redacted any personal information from this request
           required: true

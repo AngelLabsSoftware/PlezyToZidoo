@@ -60,10 +60,10 @@ CI also verifies the signer cert SHA-256 matches the durable 11.3 key
 
 ```bash
 # From a machine that has the durable JKS + keystore.properties (never paste into chat):
-gh secret set PP2Z_KEYSTORE_BASE64 -R nagel0r/PlezyPlexToZidoo < pp2z-private-release.jks.b64
-gh secret set PP2Z_KEYSTORE_PASSWORD -R nagel0r/PlezyPlexToZidoo --body "$(grep '^storePassword=' keystore.properties | cut -d= -f2-)"
-gh secret set PP2Z_KEY_ALIAS -R nagel0r/PlezyPlexToZidoo --body pp2z
-gh secret set PP2Z_KEY_PASSWORD -R nagel0r/PlezyPlexToZidoo --body "$(grep '^keyPassword=' keystore.properties | cut -d= -f2-)"
+gh secret set PP2Z_KEYSTORE_BASE64 -R AngelLabsSoftware/PlezyToZidoo < pp2z-private-release.jks.b64
+gh secret set PP2Z_KEYSTORE_PASSWORD -R AngelLabsSoftware/PlezyToZidoo --body "$(grep '^storePassword=' keystore.properties | cut -d= -f2-)"
+gh secret set PP2Z_KEY_ALIAS -R AngelLabsSoftware/PlezyToZidoo --body pp2z
+gh secret set PP2Z_KEY_PASSWORD -R AngelLabsSoftware/PlezyToZidoo --body "$(grep '^keyPassword=' keystore.properties | cut -d= -f2-)"
 ```
 
 Cloud agents often cannot set secrets (403). Prefer uploading from Adam’s machine
@@ -79,7 +79,7 @@ keytool -genkeypair -v \
   -storetype JKS \
   -keyalg RSA -keysize 2048 -validity 10000 \
   -alias pp2z \
-  -dname 'CN=PlezyPlexToZidoo Private Sideload, OU=Private, O=nagel0r, L=Local, ST=NA, C=US'
+  -dname 'CN=PlezyToZidoo Private Sideload, OU=Private, O=Angel Labs, L=Local, ST=NA, C=US'
 ```
 
 `keytool` will prompt for store and key passwords interactively.

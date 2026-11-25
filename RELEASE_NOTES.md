@@ -1,5 +1,11 @@
 # Release notes
 
+## 2026.11.14 — Launcher icon padding for Zidoo squircle
+
+- **Icons:** Regenerated launcher mipmaps, round icons, and adaptive foreground from the circular Angel Labs logo with extra inset so the white mark keeps clear orange margin after Zidoo home-tile / PackageInstaller squircle masks (horns not cropped). Settings header still uses the shaped logo.
+- Package `com.plezyplextozidoo` and PP2Z signing unchanged; playback / settings behaviour unchanged.
+- Version `2026.11.14` / `versionCode` `20261135`.
+
 ## 2026.11.13 — PlezyToZidoo+ branding + settings refinements
 
 - **Branding:** Display name **PlezyToZidoo+** by **Angel Labs** (package `com.plezyplextozidoo` unchanged — installs as an update). Settings header shows PlezyToZidoo+ / by Angel Labs; version top-right unchanged. Angel Labs orange+white logo replaces the purple triangle launcher / settings header icon (when supplied artwork is present).
